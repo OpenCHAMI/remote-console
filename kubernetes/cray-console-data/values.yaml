@@ -1,0 +1,97 @@
+#
+# MIT License
+#
+# (C) Copyright 2021-2023 Hewlett Packard Enterprise Development LP
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.
+#
+# Please refer to https://github.com/Cray-HPE/base-charts/tree/master/kubernetes/cray-service/values.yaml
+# for more info on values you can set/override
+# Note that cray-service.containers[*].image and cray-service.initContainers[*].image map values are one of the only structures that
+# differ from the standard kubernetes container spec:
+# image:
+#   repository: ""
+#   tag: "" (default = "latest")
+#   pullPolicy: "" (default = "IfNotPresent")
+
+cray-service:
+  type: Deployment
+  nameOverride: cray-console-data
+  containers:
+    cray-console-data:
+      name: console-data
+      image:
+        repository: artifactory.algol60.net/csm-docker/S-T-A-B-L-E/cray-console-data
+        # tag defaults to chart appVersion
+      ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+      resources:
+        limits:
+          cpu: "4"
+          memory: 4Gi
+        requests:
+          cpu: 100m
+          memory: 64Mi
+      livenessProbe:
+        httpGet:
+          port: 80
+          path: /liveness
+        initialDelaySeconds: 5
+        periodSeconds: 60
+      readinessProbe:
+        httpGet:
+          port: 80
+          path: /readiness
+        initialDelaySeconds: 10
+        periodSeconds: 60
+      env:
+      - name: POSTGRES_USER
+        valueFrom:
+          secretKeyRef:
+            name: console.cray-console-data-postgres.credentials
+            key: username
+      - name: POSTGRES_PASSWD
+        valueFrom:
+          secretKeyRef:
+            name: console.cray-console-data-postgres.credentials
+            key: password
+      - name: POSTGRES_HOST
+        value: cray-console-data-postgres
+      - name: POSTGRES_PORT
+        value: "5432"
+
+  ingress:
+    enabled: true
+    prefix: /apis/consoledata
+    uri: " "
+  strategy:
+    type: Recreate
+
+cray-postgresql:
+  nameOverride: cray-console-data
+  sqlCluster:
+    enabled: true
+    instanceCount: 3
+    volumeSize: 2Gi
+    users:
+      console: []
+    databases:
+      service_db: console
