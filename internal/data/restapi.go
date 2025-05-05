@@ -29,7 +29,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -87,7 +87,7 @@ func consolePodAcquireNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("consolePodAcquireNodes pod_id=%s\n", pod_id)
 
-	reqBody, err := ioutil.ReadAll(r.Body)
+	reqBody, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		log.Printf("There was an error reading the request body: %s\n", err)
@@ -153,7 +153,7 @@ func consolePodHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqBody, err := ioutil.ReadAll(r.Body)
+	reqBody, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		log.Printf("There was an error reading the request body: S%s\n", err)
@@ -246,7 +246,7 @@ where needed (called by console-operator)
 */
 func updateNodes(w http.ResponseWriter, r *http.Request) {
 	log.Printf("updateNodes\n")
-	reqBody, err := ioutil.ReadAll(r.Body)
+	reqBody, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		log.Printf("There was an error reading the request body: S%s\n", err)
@@ -359,7 +359,7 @@ func consolePodRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqBody, err := ioutil.ReadAll(r.Body)
+	reqBody, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		log.Printf("There was an error reading the request body: S%s\n", err)
@@ -413,7 +413,7 @@ func consolePodRelease(w http.ResponseWriter, r *http.Request) {
 func deleteNodes(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("deleteNodes\n")
-	reqBody, err := ioutil.ReadAll(r.Body)
+	reqBody, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		log.Printf("There was an error reading the request body: S%s\n", err)

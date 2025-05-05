@@ -33,8 +33,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	_ "github.com/lib/pq" //needed for DB stuff
 )
 
 // Cache to store the number of unique console-pods currently monitoring nodes.
@@ -89,50 +87,6 @@ func getNumActivePods() int {
 
 // Only one console-node pod can monitor itself if it is the only one running.
 const selfMonitorMax int = 1
-
-// Initialize the DB connection.
-func initDBConn() {
-
-	dbUserName := getEnv("POSTGRES_USER", "console")
-	dbName := getEnv("POSTGRES_DB", "service_db")
-	dbHostName := getEnv("POSTGRES_HOST", "console-data-cray-console-data-postgres")
-	dbPort := getEnv("POSTGRES_PORT", "5432")
-	dbPasswd := getEnv("POSTGRES_PASSWD", "")
-
-	connStr := fmt.Sprintf("sslmode=disable user=%s dbname=%s host=%s port=%s", dbUserName, dbName,
-		dbHostName, dbPort)
-
-	log.Printf("Attempt to open DB conn as: %s", connStr)
-	connStr += " password=" + dbPasswd
-	var err error
-	DB, err = sql.Open("postgres", connStr)
-	if err != nil {
-		log.Panicf("Unable to open DB connection: %s", err)
-	}
-	log.Printf("Opened DB conn")
-}
-
-// Prepare the DB if needed.
-func prepareDB() (err error) {
-
-	create_table := `
-	CREATE TABLE IF NOT EXISTS ownership (
-		node_name VARCHAR( 50 )  PRIMARY KEY NOT NULL CHECK (node_name <> ''),
-		node_bmc_name VARCHAR( 50 )  NOT NULL CHECK (node_bmc_name <> ''),
-		node_bmc_fqdn VARCHAR( 50 )  NOT NULL CHECK (node_bmc_fqdn <> ''),
-		node_class VARCHAR( 50 )  NOT NULL CHECK (node_class <> ''),
-		node_nid_number INTEGER  NOT NULL CHECK (node_nid_number <> 0),
-		node_role VARCHAR( 50 )  NOT NULL CHECK (node_role <> ''),
-		console_pod_id VARCHAR( 50 ),
-		last_updated TIMESTAMP,
-		heartbeat TIMESTAMP
-	);`
-
-	if _, err := DB.Exec(create_table); err != nil {
-		return err
-	}
-	return nil
-}
 
 // acquireNodesOfType will get a set of nodes for a particular type
 func acquireNodesOfType(nodeType string, numNodes int) (nodes string, errList []string, acquired []NodeConsoleInfo) {

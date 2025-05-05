@@ -22,35 +22,23 @@
 //  OTHER DEALINGS IN THE SOFTWARE.
 //
 
-// Either implement a regex table pattern similar to console-data router (untested)
-// to allow for handling URL params with std library, or use a router
-// library with no external deps like chi
-
-// Regex table pattern: https://github.com/Cray-HPE/console-data/blob/develop/console_data_svc/router.go
-
-package main
+package console
 
 import (
 	"github.com/go-chi/chi/v5"
 )
 
-var router = chi.NewRouter()
+var RequestRouter = chi.NewRouter()
 
-func setupRoutes(ds DataService, hs HealthService, dbs DebugService) {
+func SetupRoutes() {
 	// k8s routes
-	router.Get("/console-operator/liveness", hs.doLiveness)
-	router.Get("/console-operator/readiness", hs.doReadiness)
-	router.Get("/console-operator/health", hs.doHealth)
+	RequestRouter.Get("/remote-console/liveness", doLiveness)
+	RequestRouter.Get("/remote-console/readiness", doReadiness)
+	RequestRouter.Get("/remote-console/health", doHealth)
 
 	// debug only routes
-	router.Get("/console-operator/info", dbs.doInfo)
-	router.Delete("/console-operator/clearData", dbs.doClearData)
-	router.Post("/console-operator/suspend", dbs.doSuspend)
-	router.Post("/console-operator/resume", dbs.doResume)
-	router.Patch("/console-operator/v0/setMaxNodesPerPod", dbs.doSetMaxNodesPerPod)
-	router.Get("/console-operator/v0/getNodePod", ds.doGetNodePod)
-
-	// v1
-	router.Get("/console-operator/v1/location/{podID}", ds.doGetPodLocation)
-	router.Get("/console-operator/v1/replicas", ds.doGetPodReplicaCount)
+	// router.Get("/remote-console/info", dbs.doInfo)
+	// router.Delete("/remote-console/clearData", dbs.doClearData)
+	// router.Post("/remote-console/suspend", dbs.doSuspend)
+	// router.Post("/remote-console/resume", dbs.doResume)
 }

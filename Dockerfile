@@ -35,38 +35,39 @@ RUN set -eux \
 ENV GOPATH=/usr/local/golib
 RUN export GOPATH=$GOPATH
 
-# Copy in all the necessary files
-COPY console_data_svc/*.go $GOPATH/src/
-COPY go.mod $GOPATH/src
-COPY vendor/ $GOPATH/src/
-
 # set up go env
 RUN go env -w GO111MODULE=auto
 
 # Build the image
-RUN set -ex && go build -v -o /app/console_data_svc $GOPATH/src/*.go
+COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
+#COPY configs configs
+#COPY scripts scripts
+COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
+COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
+COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
+
+RUN set -ex  && go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v -tags musl -o /usr/local/bin/remote-console
 
 ### Final Stage ###
 # Start with a fresh image so build tools are not included
-FROM docker.io/alpine:3 as base
+FROM docker.io/alpine:3 AS base
 
 # Copy in the needed files
-COPY --from=build /app/console_data_svc /app/
+COPY --from=build /usr/local/bin/remote-console /app/
 
 # Install needed packages
 # NOTE: setcap allows non-root users to bind to port 80 for a specific application
 RUN set -eux \
     && apk add --upgrade --no-cache apk-tools \
     && apk update \
-    && apk add --no-cache postgresql-client curl libcap \
+    && apk add --no-cache libcap \
     && apk -U upgrade --no-cache \
-    && setcap 'cap_net_bind_service=+ep' /app/console_data_svc
+    && setcap 'cap_net_bind_service=+ep' /app/remote-console
 
 RUN echo 'alias ll="ls -l"' > ~/.bashrc
 RUN echo 'alias vi="vim"' >> ~/.bashrc
 
 # set to run as user 'nobody'
-RUN chmod -R 755 /app
 USER 65534:65534
 
-ENTRYPOINT ["/app/console_data_svc"]
+ENTRYPOINT ["/usr/bin/false"]

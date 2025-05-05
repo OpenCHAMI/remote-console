@@ -24,32 +24,37 @@
 
 // This file contains the code needed to find node information
 
-package main
+package console
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"strings"
+	"sync"
 )
 
-type NodeService interface {
-	getRedfishEndpoints() ([]redfishEndpoint, error)
-	getStateComponents() ([]stateComponent, error)
-	getCurrentNodesFromHSM() (nodes []nodeConsoleInfo)
-	updateNodeCounts(numMtnNodes, numRvrNodes int)
-}
+var (
+	HsmURL    = "http://cray-smd/"
+	DebugOnly = false
+)
 
-// Implements NodeService
-type NodeManager struct {
-	k8Service K8Service
-}
+// Globals for managing nodes being watched
+//  Note that there are three classes of nodes:
+//
+//	IPMI Nodes: connect through ipmi protocol directly through conman
+//	CertSSH Nodes: connect through expect script via passwordless ssh
+//	PassSSH Nodes: connect through expect script via password based ssh
 
-// Inject dependencies
-func NewNodeManager(k8Service K8Service) NodeService {
-	return &NodeManager{k8Service: k8Service}
-}
+// we need a more general and configurable system for mapping classes
+// connection methods, and we need to know how "class" is generated
+// both in CSM and OC-SMD
+
+var currNodesMutex = &sync.Mutex{}
+
+// this should just be a map of all of them, surely the swtiching cost
+// isn't very high?
+var currentNodes map[string]*nodeConsoleInfo = make(map[string]*nodeConsoleInfo) // [xname,*consoleInfo]
 
 // Struct to hold all node level information needed to form a console connection
 // NOTE: this is the basic unit of information required for each node
@@ -68,18 +73,17 @@ type nodeConsoleInfo struct {
 	Role     string // role of the node
 }
 
-// Function to determine if a node is Mountain hardware
-func (node nodeConsoleInfo) isMountain() bool {
+// TODO: at some point we need to add a config file so that this
+// isn't static and new nodes are allowed to be added.
+func (node nodeConsoleInfo) isCertSSH() bool {
 	return node.Class == "Mountain" || node.Class == "Hill"
 }
 
-// Function to determine if a node is River hardware
-func (node nodeConsoleInfo) isRiver() bool {
+func (node nodeConsoleInfo) isIPMI() bool {
 	return node.Class == "River"
 }
 
-// Function to determine if a node is Paradise hardware
-func (node nodeConsoleInfo) isParadise() bool {
+func (node nodeConsoleInfo) isPassSSH() bool {
 	return node.Class == "Paradise"
 }
 
@@ -118,13 +122,13 @@ func (sc stateComponent) String() string {
 }
 
 // Query hsm for redfish endpoint information
-func (NodeManager) getRedfishEndpoints() ([]redfishEndpoint, error) {
+func getRedfishEndpoints() ([]redfishEndpoint, error) {
 	type response struct {
 		RedfishEndpoints []redfishEndpoint
 	}
 
 	// Query hsm to get the redfish endpoints
-	URL := "http://cray-smd/hsm/v2/Inventory/RedfishEndpoints"
+	URL := HsmURL + "hsm/v2/Inventory/RedfishEndpoints"
 	data, _, err := getURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get redfish endpoints from hsm:%s", err)
@@ -143,14 +147,14 @@ func (NodeManager) getRedfishEndpoints() ([]redfishEndpoint, error) {
 }
 
 // Query hsm for state component information
-func (NodeManager) getStateComponents() ([]stateComponent, error) {
+func getStateComponents() ([]stateComponent, error) {
 	// get the component states from hsm - includes river/mountain information
 	type response struct {
 		Components []stateComponent
 	}
 
 	// get the state components from hsm
-	URL := "http://cray-smd/hsm/v2/State/Components"
+	URL := HsmURL + "hsm/v2/State/Components"
 	data, _, err := getURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get state component information from hsm:%s", err)
@@ -170,7 +174,7 @@ func (NodeManager) getStateComponents() ([]stateComponent, error) {
 }
 
 // Query hsm for Paradise (xd224) nodes
-func (NodeManager) getParadiseNodes() (map[string]struct{}, error) {
+func getParadiseNodes() (map[string]struct{}, error) {
 	// Paradise nodes are identified by having the manufacturer as 'Foxconn' and
 	// the model as either 'HPE Cray Supercomputing XD224' or '1A62WCB00-600-G'.
 	// There are a limited number of units that were sent to the field with the
@@ -197,7 +201,7 @@ func (NodeManager) getParadiseNodes() (map[string]struct{}, error) {
 	// Query hsm to get the Paradise nodes
 	// NOTE: this only pulls the Foxconn BMCs from the inventory so there is a bit of
 	//  server side filtering going on
-	URL := "http://cray-smd/hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
+	URL := HsmURL + "hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
 	data, _, err := getURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get hardware inventory from hsm:%s", err)
@@ -224,19 +228,19 @@ func (NodeManager) getParadiseNodes() (map[string]struct{}, error) {
 	return nodes, nil
 }
 
-func (nm NodeManager) getCurrentNodesFromHSM() (nodes []nodeConsoleInfo) {
+func getCurrentNodesFromHSM() (nodes []nodeConsoleInfo) {
 	// Get the BMC IP addresses and user, and password for individual nodes.
 	// conman is only set up for River nodes.
 	log.Printf("Starting to get current nodes on the system")
 
-	rfEndpoints, err := nm.getRedfishEndpoints()
+	rfEndpoints, err := getRedfishEndpoints()
 	if err != nil {
 		log.Printf("Unable to build configuration file - error fetching redfish endpoints: %s", err)
 		return nil
 	}
 
 	// get the state information to find mountain/river designation
-	stComps, err := nm.getStateComponents()
+	stComps, err := getStateComponents()
 	if err != nil {
 		log.Printf("Unable to build configuration file - error fetching state components: %s", err)
 		return nil
@@ -244,7 +248,7 @@ func (nm NodeManager) getCurrentNodesFromHSM() (nodes []nodeConsoleInfo) {
 
 	// get the paradise nodes
 	// NOTE: this returns a pseudo-set to speed up lookups
-	paradiseNodes, err := nm.getParadiseNodes()
+	paradiseNodes, err := getParadiseNodes()
 	if err != nil {
 		// log the error but don't die - most systems will not have Paradise nodes anyway
 		log.Printf("Unable to identify if there are any Paradise nodes on the system. %s", err)
@@ -287,58 +291,4 @@ func (nm NodeManager) getCurrentNodesFromHSM() (nodes []nodeConsoleInfo) {
 	}
 
 	return nodes
-}
-
-// update settings based on the current number of nodes in the system
-func (nm NodeManager) updateNodeCounts(numMtnNodes, numRvrNodes int) {
-	// update the number of pods based on max numbers
-	// NOTE: at this point we will require one more than absolutely required both
-	//  to handle the edge case of exactly matching a multiple of the max per
-	//  pod as well as adding a little resiliency
-	log.Printf("Mountain current: %d, max per node: %d", numMtnNodes, maxMtnNodesPerPod)
-	log.Printf("River    current: %d, max per node: %d", numRvrNodes, maxRvrNodesPerPod)
-
-	// bail if there hasn't been anything reported yet - don't want to change
-	// replica count when hsm hasn't been populated (or contacted) yet
-	if numMtnNodes+numRvrNodes == 0 {
-		log.Printf("No nodes found, skipping count update")
-		return
-	}
-
-	// lets be extra paranoid about divide by zero issues...
-	mm := math.Max(float64(maxMtnNodesPerPod), 1)
-	mr := math.Max(float64(maxRvrNodesPerPod), 1)
-
-	// calculate number of pods needed for mountain and river nodes, choose max
-	numMtnReq := int(math.Ceil(float64(numMtnNodes)/mm) + 1)
-	numRvrReq := int(math.Ceil(float64(numRvrNodes)/mr) + 1)
-	newNumPods := numMtnReq
-	if numRvrReq > newNumPods {
-		newNumPods = numRvrReq
-	}
-
-	// update the number of nodes / pod based on number of pods
-	nm.k8Service.updateReplicaCount(newNumPods)
-
-	// update the number of mtn + river consoles to watch per pod
-	// NOTE: adding a little slop to how many each pod wants
-	// needed for worst case where a replica can acquire more nodes
-	// however, the only available nodes are themselves. Adding the replica counts
-	// will allow room to avoid orphaned mtn or rvr nodes.
-	newMtn := int(math.Ceil(float64(numMtnNodes)/float64(newNumPods)) + 1)
-	newRvr := int(math.Ceil(float64(numRvrNodes)/float64(newNumPods)) + 1)
-	currNodeReplicas, err := nm.k8Service.getReplicaCount()
-	if err != nil {
-		newMtn += currNodeReplicas
-		newRvr += currNodeReplicas
-		log.Printf("Adding replica padding per pod- Mtn: %d, Rvr: %d", newMtn, newRvr)
-		nm.k8Service.updateNodesPerPod(newMtn, newRvr)
-	} else {
-		log.Printf("New number of nodes per pod- Mtn: %d, Rvr: %d", newMtn, newRvr)
-		// push new numbers where they need to go
-		if newRvr != numRvrNodesPerPod || newMtn != numMtnNodesPerPod {
-			// something changed so we need to update
-			nm.k8Service.updateNodesPerPod(newMtn, newRvr)
-		}
-	}
 }

@@ -24,7 +24,7 @@
 
 // This file contains the code needed to handle zombie processes
 
-package main
+package console
 
 import (
 	"bytes"
@@ -43,7 +43,7 @@ import (
 //  find zombie processes and terminate them cleanly.
 
 // Function to scan the process table for zombie processes
-func watchForZombies() {
+func WatchForZombies() {
 	for {
 		// get the process information from the system
 		zombies := findZombies()

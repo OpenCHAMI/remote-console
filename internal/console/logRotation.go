@@ -24,7 +24,7 @@
 
 // This file contains the code needed to handle log rotation inside the console pod.
 
-package main
+package console
 
 import (
 	"bufio"
@@ -59,9 +59,9 @@ var logRotAggFileSize string = "20M" // size of the aggregation file to rotate
 var logRotAggNumRotate int = 1       // number of aggregation backup copies to keep
 
 // Initialize and start log rotation
-func logRotate() {
+func LogRotate() {
 	// Set up the 'backups' directory for logrotation to use
-	ensureDirPresent(logRotDir, 0755)
+	EnsureDirPresent(logRotDir, 0755)
 
 	// Check for log rotation env vars
 	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
@@ -195,12 +195,10 @@ func updateLogRotateConf() {
 
 	// Add all nodes
 	consoleLogBackupDir := "/var/log/conman.old"
-	allNodes := [3](*map[string]*nodeConsoleInfo){&currentRvrNodes, &currentPdsNodes, &currentMtnNodes}
-	for _, ar := range allNodes {
-		for xname := range *ar {
-			fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
-			writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
-		}
+	for _, cni := range currentNodes {
+		xname := cni.NodeName
+		fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
+		writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
 	}
 
 	fmt.Fprintln(lrf, "")

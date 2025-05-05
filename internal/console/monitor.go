@@ -24,7 +24,7 @@
 
 // This file contains the functions to monitor for changes in keys and certs
 
-package main
+package console
 
 import (
 	"bytes"
@@ -50,12 +50,12 @@ func checkForChanges() {
 	restartConman := false
 
 	// check for changes in the mountain key files
-	if checkIfMountainConsoleKeysChanged() {
+	if checkIfCertKeysChanged() {
 		restartConman = true
 	}
 
 	// check for changes in river keys
-	if checkIfRiverPasswordsChanged() {
+	if checkIfPasswordsChanged() {
 		// the config file will be updated in the runConman thread when conman is restarted
 		restartConman = true
 	}
@@ -67,7 +67,9 @@ func checkForChanges() {
 }
 
 // function to continuously monitor for changes that require conman to restart
-func doMonitor() {
+func CredMonitor() {
+	// initial sleep so we're not racing with the initial startup
+	time.Sleep(time.Duration(monitorIntervalSecs) * time.Second)
 	// NOTE: this is intended to be constantly running in its own thread
 	for {
 		// do a single monitor event
@@ -79,7 +81,7 @@ func doMonitor() {
 }
 
 // function to check if the passwords have changed since conman was configured
-func checkIfRiverPasswordsChanged() bool {
+func checkIfPasswordsChanged() bool {
 	if previousPasswords == nil {
 		// this shouldn't happen due to the order of initialization, but just to be safe we skip this case.
 		return false
@@ -89,10 +91,9 @@ func checkIfRiverPasswordsChanged() bool {
 	defer currNodesMutex.Unlock()
 
 	var xnames []string = nil
-	allNodes := [2](*map[string]*nodeConsoleInfo){&currentRvrNodes, &currentPdsNodes}
-	for _, ar := range allNodes {
-		for _, nodeCi := range *ar {
-			xnames = append(xnames, nodeCi.BmcName)
+	for _, nci := range currentNodes {
+		if nci.isIPMI() || nci.isPassSSH() {
+			xnames = append(xnames, nci.BmcName)
 		}
 	}
 
@@ -115,21 +116,27 @@ func checkIfRiverPasswordsChanged() bool {
 }
 
 // function to check if the console keys have changed since the last run of this function
-func checkIfMountainConsoleKeysChanged() bool {
+func checkIfCertKeysChanged() bool {
 	var keysChanged bool = false
 
-	if len(currentMtnNodes) == 0 {
-		// if no mountain nodes are monitored, the keys don't matter
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+
+	// if no mountain nodes are monitored, the keys don't matter
+	for _, nci := range currentNodes {
+		if nci.isCertSSH() {
+			break
+		}
 		return false
 	}
 
 	// load hashes of both the public and private key files for comparison
-	currentPrivateKeyHash, err := hashFile(mountainConsoleKey)
+	currentPrivateKeyHash, err := hashFile(sshConsoleKey)
 	if err != nil {
 		log.Printf("Error generating a hash of the private console key: %s", err)
 		return false
 	}
-	currentPublicKeyHash, err := hashFile(mountainConsoleKeyPub)
+	currentPublicKeyHash, err := hashFile(sshConsoleKeyPub)
 	if err != nil {
 		log.Printf("Error generating a hash of the public console key: %s", err)
 		return false

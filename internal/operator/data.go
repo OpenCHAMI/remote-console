@@ -30,7 +30,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -274,7 +274,7 @@ func (dm DataManager) doGetNodePod(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// read the request data - must be in json content
-	reqBody, err := ioutil.ReadAll(r.Body)
+	reqBody, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		log.Printf("There was an error reading the request body: S%s\n", err)

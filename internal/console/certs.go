@@ -24,13 +24,12 @@
 
 // This file contains the functions to configure and interact with conman
 
-package main
+package console
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -213,7 +212,7 @@ func vaultGetMountainConsoleCredentials() error {
 	// This will overwrite the existing public or private key files.
 
 	// Authenticate to Vault
-	svcAcctToken, err := ioutil.ReadFile(svcAcctTokenFile)
+	svcAcctToken, err := os.ReadFile(svcAcctTokenFile)
 	if err != nil {
 		log.Printf("Unable to read the service account token file: %s  Can not authenticate to vault.", err)
 		return fmt.Errorf("Unable to read the service account token file: %s can not authenticate to vault", err)
@@ -250,7 +249,7 @@ func vaultGetMountainConsoleCredentials() error {
 	log.Printf("Obtained BMC console key from vault.")
 
 	// Write the private key to the local file system.
-	err = ioutil.WriteFile(mountainConsoleKey, []byte(pvtKey), 0600)
+	err = os.WriteFile(mountainConsoleKey, []byte(pvtKey), 0600)
 	if err != nil {
 		log.Printf("Failed to write our the private ssh key received from Vault.")
 		return err
@@ -297,7 +296,7 @@ func generateMountainConsoleCredentials() error {
 // Ensure that Mountain node console credentials have been generated.
 func ensureMountainConsoleKeysExist() bool {
 	// if running in debug mode there won't be any nodes or vault present
-	if debugOnly {
+	if DebugOnly {
 		log.Print("Running in debug mode - skipping mountain cred generation")
 		return true
 	}
@@ -381,13 +380,13 @@ func deployMountainConsoleKeys(nodes []nodeConsoleInfo) (bool, scsdList) {
 	scsdReply := scsdList{}
 
 	// if running in debug mode there won't be any nodes or vault present
-	if debugOnly {
+	if DebugOnly {
 		log.Print("Running in debug mode - skipping mountain cred generation")
 		return true, scsdReply
 	}
 
 	// Read in the public key.
-	pubKey, err := ioutil.ReadFile(mountainConsoleKeyPub)
+	pubKey, err := os.ReadFile(mountainConsoleKeyPub)
 	if err != nil {
 		log.Printf("Unable to read the public key file: %s", err)
 		return false, scsdReply
@@ -399,7 +398,7 @@ func deployMountainConsoleKeys(nodes []nodeConsoleInfo) (bool, scsdList) {
 	// both nodes.
 	mtnBmcList := make(map[string]string)
 	for _, nodeCi := range nodes {
-		if nodeCi.isMountain() {
+		if nodeCi.isCertSSH() {
 			mtnBmcList[nodeCi.BmcFqdn] = nodeCi.BmcName
 		}
 	}

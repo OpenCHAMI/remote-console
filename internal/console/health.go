@@ -24,7 +24,7 @@
 
 // This file contains the health endpoint functions
 
-package main
+package console
 
 import (
 	"fmt"
@@ -39,32 +39,15 @@ type HealthService interface {
 	getCurrentHealth() HealthResponse
 }
 
-// Implements HealthService
-type HealthManager struct {
-	dataService DataService
-}
-
-// Constructor injection for dependencies
-func NewHealthManager(ds DataService) HealthService {
-	return &HealthManager{dataService: ds}
-}
-
 // HealthResponse - used to report service health stats
 type HealthResponse struct {
-	NumberConsoles       string `json:"consoles"`
-	HardwareUpdateSec    string `json:"hardwareupdatesec"`
-	LastHardwareUpdate   string `json:"hardwareupdate"`
-	NumberNodePods       string `json:"nodepods"`
-	NumberRvrNodesPerPod string `json:"rvrnodesperpod"`
-	NumberMtnNodesPerPod string `json:"mtnnodesperpod"`
-	MaxRvrNodesPerPod    string `json:"maxrvrnodesperpod"`
-	MaxMtnNodesPerPod    string `json:"maxmtnnodesperpod"`
-	HeartbeatCheckSec    string `json:"heartbeatcheck"`
-	HeartbeatStaleMin    string `json:"heartbeatstale"`
+	NumberConsoles     string `json:"consoles"`
+	HardwareUpdateSec  string `json:"hardwareupdatesec"`
+	LastHardwareUpdate string `json:"hardwareupdate"`
 }
 
 // Debugging information query
-func (hm HealthManager) doHealth(w http.ResponseWriter, r *http.Request) {
+func doHealth(w http.ResponseWriter, r *http.Request) {
 	// NOTE: this is provided as a quick check of the internal status for
 	//  administrators to aid in determining the health of this service.
 
@@ -77,7 +60,7 @@ func (hm HealthManager) doHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// get the current health status
-	stats := hm.getCurrentHealth()
+	stats := getCurrentHealth()
 
 	// log the query
 	log.Printf("Health check: %s", stats)
@@ -88,23 +71,16 @@ func (hm HealthManager) doHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // Fill out the current status of a HealthResponse object
-func (HealthManager) getCurrentHealth() HealthResponse {
+func getCurrentHealth() HealthResponse {
 	var stats HealthResponse
 	stats.HardwareUpdateSec = fmt.Sprintf("%d", newHardwareCheckPeriodSec)
 	stats.LastHardwareUpdate = hardwareUpdateTime
 	stats.NumberConsoles = fmt.Sprintf("%d", len(nodeCache))
-	stats.NumberNodePods = fmt.Sprintf("%d", numNodePods)
-	stats.NumberRvrNodesPerPod = fmt.Sprintf("%d", numRvrNodesPerPod)
-	stats.NumberMtnNodesPerPod = fmt.Sprintf("%d", numMtnNodesPerPod)
-	stats.MaxRvrNodesPerPod = fmt.Sprintf("%d", maxRvrNodesPerPod)
-	stats.MaxMtnNodesPerPod = fmt.Sprintf("%d", maxMtnNodesPerPod)
-	stats.HeartbeatCheckSec = fmt.Sprintf("%d", heartbeatCheckPeriodSec)
-	stats.HeartbeatStaleMin = fmt.Sprintf("%d", heartbeatStaleMinutes)
 	return stats
 }
 
 // Basic liveness probe
-func (HealthManager) doLiveness(w http.ResponseWriter, r *http.Request) {
+func doLiveness(w http.ResponseWriter, r *http.Request) {
 	// NOTE: this is coded in accordance with kubernetes best practices
 	//  for liveness/readiness checks.  This function should only be
 	//  used to indicate the server is still alive and processing requests.
@@ -122,7 +98,7 @@ func (HealthManager) doLiveness(w http.ResponseWriter, r *http.Request) {
 }
 
 // Basic readiness probe
-func (HealthManager) doReadiness(w http.ResponseWriter, r *http.Request) {
+func doReadiness(w http.ResponseWriter, r *http.Request) {
 	// NOTE: this is coded in accordance with kubernetes best practices
 	//  for liveness/readiness checks.  This function should only be
 	//  used to indicate the server is still alive and processing requests.

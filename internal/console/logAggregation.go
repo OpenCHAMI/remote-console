@@ -24,7 +24,7 @@
 
 // This file contains the code needed to handle aggregation of log files
 
-package main
+package console
 
 import (
 	"bufio"
@@ -178,7 +178,7 @@ func respinAggLog() {
 		return
 	}
 	conAggLogDir := conAggLogFile[:pos]
-	if _, err := ensureDirPresent(conAggLogDir, 0766); err != nil {
+	if _, err := EnsureDirPresent(conAggLogDir, 0766); err != nil {
 		log.Printf("Failed to respin aggregation file: %s", err)
 		return
 	}

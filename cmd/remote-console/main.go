@@ -35,13 +35,25 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	c "github.com/evanmcc/remote-console/internal/console"
+	// base "github.com/Cray-HPE/hms-base/v2"
+	// "github.com/Cray-HPE/hms-certs/pkg/hms_certs"
+	// trsapi "github.com/Cray-HPE/hms-trs-app-api/v3/pkg/trs_http_api"
+	// "github.com/namsral/flag"
+	// "github.com/sirupsen/logrus"
 )
 
-// The API service port
-var svcHost = "0.0.0.0:80"
+var (
+	// The API service port
+	svcHost = "0.0.0.0:80"
 
-// Debug logging (default is off)
-var debugLog = DebugLog{enabled: false}
+	// Debug logging (default is off)
+	debugLog = DebugLog{enabled: false}
+
+	// Most recent update from the HSM
+	hardwareUpdateTime string = "Unknown"
+)
 
 // Get environment var with default.
 func getEnv(key, fallback string) string {
@@ -55,64 +67,90 @@ func main() {
 	// Enable debug logging if requested.
 	debugLog.Init()
 
-	log.Printf("Console data service starting")
+	// allow for changes in the SMD URL
+	c.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
+	c.DebugOnly = getEnv("DEBUG", "false") == "true"
+
+	log.Printf("Remote console service starting")
+	// Set up the zombie killer
+	log.Printf("Starting zombie killer...")
+	go c.WatchForZombies()
+
+	// first we set up the goroutine that polls the hsm
+	go c.WatchHardware()
+
+	// then we set up the goroutine that controls conman
+	c.EnsureDirPresent("/var/log/conman", 666)
+
+	// I am not sure that we need this, so I am leaving it out for
+	// now, I think that normal logging will work now that we only
+	// have one container
+	// respinAggLog()
+
+	// Initialize and start log rotation
+	c.LogRotate()
+
+	// spin a thread that watches for changes in console configuration
+	log.Printf("Starting hardware watch loop...")
+	go c.WatchForNodes()
+
+	// start up the thread that runs conman
+	go c.RunConman()
+
+	// start the thread that will make sure that the conman creds are correct
+	go c.CredMonitor()
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs
 	//  to be cleaned up.  This will trap any signals and wait to
 	//  process them until the channel is read.
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 
-	// Ensure the database connection and schema are setup.
-	log.Printf("Initializing DB conn")
-	initDBConn()
-
-	// Wait until we can complete schema initialization.
-	log.Printf("Prepare DB")
-	const (
-		initBackoff time.Duration = 5
-		maxBackoff  time.Duration = 60
-	)
-	backoff := initBackoff
-	for {
-		if err := prepareDB(); err != nil {
-			log.Printf("prepareDB has not completed yet")
-			time.Sleep(backoff * time.Second)
-		} else {
-			log.Printf("prepareDB complete")
-			break
-		}
-		if backoff < maxBackoff {
-			backoff += backoff
-		}
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
-	}
-	defer DB.Close()
-
-	// spin the server in a separate thread so main can wait on an os
 	// signal to cleanly shut down
-	httpSrv := http.Server{
-		Addr:    svcHost,
-		Handler: http.HandlerFunc(RequestRouter),
-	}
 	go func() {
+		c.SetupRoutes()
 		// NOTE: do not use log.Fatal as that will immediately exit
 		// the program and short-circuit the shutdown logic below
-		log.Printf("Info: Server %s\n", httpSrv.ListenAndServe())
+		log.Printf("Info: Server %s\n", http.ListenAndServe(svcHost, c.RequestRouter))
 	}()
-	log.Printf("Info: Console data API listening on: %s\n", svcHost)
 
-	// wait here for a signal from the os that we are shutting down
-	sig := <-sigs
-	log.Printf("Info: Detected signal to close service: %s", sig)
+	// Server run context
+	server := &http.Server{Addr: svcHost, Handler: c.RequestRouter}
+	serverCtx, serverStopCtx := context.WithCancel(context.Background())
 
-	// stop the server from taking requests
-	// NOTE: this waits for active connections to finish
-	log.Printf("Info: Server shutting down")
-	httpSrv.Shutdown(context.Background())
+	// Listen for syscall signals for process to interrupt/quit
+	go func() {
+		sig := <-sigs
+		log.Printf("Info: Detected signal to close service: %s", sig)
+
+		// Shutdown signal with grace period of 30 seconds
+		shutdownCtx, _ := context.WithTimeout(serverCtx, 30*time.Second)
+
+		go func() {
+			<-shutdownCtx.Done()
+			if shutdownCtx.Err() == context.DeadlineExceeded {
+				log.Fatal("graceful shutdown timed out.. forcing exit.")
+			}
+		}()
+
+		// Trigger graceful shutdown
+		err := server.Shutdown(shutdownCtx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		serverStopCtx()
+	}()
+
+	// Run the server
+	log.Printf("Info: Console API listening on: %s\n", svcHost)
+	err := server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+
+	// Wait for server context to be stopped
+	<-serverCtx.Done()
 }
 
 // DebugLog enables debug logging.

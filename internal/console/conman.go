@@ -24,7 +24,7 @@
 
 // This file contains the functions to configure and interact with conman
 
-package main
+package console
 
 import (
 	"fmt"
@@ -56,26 +56,23 @@ func configConman(forceConfigUpdate bool) bool {
 	updateConfigFile(forceConfigUpdate)
 
 	// set up a thread to add log output to the aggregation file
-	allNodes := [3](*map[string]*nodeConsoleInfo){&currentRvrNodes, &currentPdsNodes, &currentMtnNodes}
-	for _, ar := range allNodes {
-		for nn := range *ar {
-			// make sure the node is being aggregated - no-op if already being done
-			aggregateFile(nn)
-		}
+	for xname := range currentNodes {
+		// make sure the node is being aggregated - no-op if already being done
+		aggregateFile(xname)
 	}
 
 	// Make sure that we have a proper ssh console keypair deployed
 	// here and on the Mountain BMCs before starting conman.
 	// NOTE: this function will wait to return until keys are
 	//  present if there are Mountain consoles to configure
-	ensureMountainConsoleKeysPresent()
+	ensureCertSSHKeysPresent()
 
 	// return if there are any nodes
-	return (len(currentMtnNodes) + len(currentRvrNodes) + len(currentPdsNodes)) > 0
+	return len(currentNodes) > 0
 }
 
 // Loop that starts / restarts conmand process
-func runConman() {
+func RunConman() {
 	// This loop runs forever, updating the configuration file and
 	// starting or restarting the conmand process when needed
 	// NOTE: force a creation of the config file the first time through
@@ -87,7 +84,7 @@ func runConman() {
 		forceConfigUpdate = false
 
 		// start the conmand process
-		if debugOnly {
+		if DebugOnly {
 			// not really running, just give a longer pause before re-running config
 			time.Sleep(25 * time.Second)
 			log.Printf("Sleeping the executeConman process")
@@ -121,14 +118,13 @@ func signalConmanHUP() {
 		log.Print("Warning: Attempting to signal conman process when nil.")
 
 		// if we are in debug mode, respin the fake logs as needed
-		if debugOnly {
+		if DebugOnly {
 			// NOTE - debugging test code, so don't worry about mutex for current nodes
 			log.Printf("Respinning current log test files...")
-			for nn := range currentRvrNodes {
-				go createTestLogFile(nn, true)
-			}
-			for nn := range currentMtnNodes {
-				go createTestLogFile(nn, true)
+			for _, nci := range currentNodes {
+				if nci.isCertSSH() || nci.isIPMI() {
+					go createTestLogFile(nci.NodeName, true)
+				}
 			}
 		}
 	}
@@ -273,91 +269,131 @@ func updateConfigFile(forceUpdate bool) {
 		log.Printf("Unable to copy base file into config: %s", err)
 	}
 
-	// collect the creds for the river and paradise endpoints
-	var rvrXNames []string = nil
-	for _, v := range currentRvrNodes {
-		rvrXNames = append(rvrXNames, v.BmcName)
-	}
-	for _, v := range currentPdsNodes {
-		rvrXNames = append(rvrXNames, v.BmcName)
+	// collect the creds for the IPMI and PassSSH endpoints
+	var ipmiXNames []string = make([]string, 0)
+	for _, nci := range currentNodes {
+		if nci.isIPMI() {
+			ipmiXNames = append(ipmiXNames, nci.BmcName)
+		} else if nci.isPassSSH() {
+			ipmiXNames = append(ipmiXNames, nci.BmcName)
+		}
 	}
 
-	// gather the river passwords
+	// gather passwords
 	// NOTE: sometimes if vault hasn't been populated yet there may be no
 	// return values - try again for a while in that case.
-	passwords := getPasswordsWithRetries(rvrXNames, 15, 10)
+	passwords := getPasswordsWithRetries(ipmiXNames, 15, 10)
 	previousPasswords = passwords
 
-	// Add River endpoints to the config file to be accessed by ipmi
-	for _, nodeCi := range currentRvrNodes {
-		// connect using ipmi
-		creds, ok := passwords[nodeCi.BmcName]
-		if !ok {
-			log.Printf("No creds record returned for %s", nodeCi.BmcName)
-		}
-		log.Printf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:REDACTED,W:solpayloadsize\"\n",
-			nodeCi.NodeName,
-			nodeCi.BmcFqdn,
-			creds.Username)
-		// write the line to the config file
-		output := fmt.Sprintf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:%s,W:solpayloadsize\"\n",
-			nodeCi.NodeName,
-			nodeCi.BmcFqdn,
-			creds.Username,
-			creds.Password)
+	for _, nci := range currentNodes {
+		if nci.isIPMI() {
+			ipmiXNames = append(ipmiXNames, nci.BmcName)
+			// connect using ipmi
+			creds, ok := passwords[nci.BmcName]
+			if !ok {
+				log.Printf("No creds record returned for %s", nci.BmcName)
+			}
+			log.Printf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:REDACTED,W:solpayloadsize\"\n",
+				nci.NodeName,
+				nci.BmcFqdn,
+				creds.Username)
+			// write the line to the config file
+			output := fmt.Sprintf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:%s,W:solpayloadsize\"\n",
+				nci.NodeName,
+				nci.BmcFqdn,
+				creds.Username,
+				creds.Password)
 
-		// write the output line if there is anything present
-		if _, err = cf.WriteString(output); err != nil {
-			// log the error then panic
-			// TODO - maybe a little harsh to kill the entire process here?
-			log.Panic(err)
-		}
+			// write the output line if there is anything present
+			if _, err = cf.WriteString(output); err != nil {
+				// log the error then panic
+				// TODO - maybe a little harsh to kill the entire process here?
+				log.Panic(err)
+			}
 
+		} else if nci.isPassSSH() {
+			ipmiXNames = append(ipmiXNames, nci.BmcName)
+			// connect using password ssh
+			creds, ok := passwords[nci.BmcName]
+			if !ok {
+				log.Printf("No creds record returned for %s", nci.BmcName)
+			}
+			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-console %s %s REDACTED\"\n",
+				nci.NodeName,
+				nci.BmcFqdn,
+				creds.Username)
+			// write the line to the config file
+			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-console %s %s %s\"\n",
+				nci.NodeName,
+				nci.BmcFqdn,
+				creds.Username,
+				creds.Password)
+
+			// write the output line if there is anything present
+			if _, err = cf.WriteString(output); err != nil {
+				// log the error then panic
+				// TODO - maybe a little harsh to kill the entire process here?
+				log.Panic(err)
+			}
+
+		} else if nci.isCertSSH() {
+			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
+				nci.NodeName,
+				nci.NodeName)
+			// write the line to the config file
+			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
+				nci.NodeName,
+				nci.NodeName)
+
+			// write the output line if there is anything present
+			if _, err = cf.WriteString(output); err != nil {
+				// log the error then panic
+				// TODO - maybe a little harsh to kill the entire process here?
+				log.Panic(err)
+			}
+
+		}
+	}
+}
+
+// DEBUG Function to create and add to a fake log file
+func createTestLogFile(xname string, respin bool) {
+	// NOTE: this function is only for use in a debug environment where there
+	//  are no real console connections present.
+
+	var sleepTime time.Duration = 1 * time.Second
+	filename := fmt.Sprintf("/var/log/conman/console.%s", xname)
+
+	// Ff respin is true, only create if the file is not present - meant to
+	// be used when a logrotation has moved the original file and we need to
+	// create a new one back at the original location.  If the file is still there
+	// we do not need to re-create.
+	if respin {
+		if _, err := os.Stat(filename); err == nil {
+			log.Printf("Respinning log file %s, but it exists, so exiting", xname)
+			return
+		}
 	}
 
-	// Add Paradise endpoints to the config file to be accessed by ssh, but with passwords
-	for _, nodeCi := range currentPdsNodes {
-		// connect using ipmi
-		creds, ok := passwords[nodeCi.BmcName]
-		if !ok {
-			log.Printf("No creds record returned for %s", nodeCi.BmcName)
-		}
-		log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-console %s %s REDACTED\"\n",
-			nodeCi.NodeName,
-			nodeCi.BmcFqdn,
-			creds.Username)
-		// write the line to the config file
-		output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-console %s %s %s\"\n",
-			nodeCi.NodeName,
-			nodeCi.BmcFqdn,
-			creds.Username,
-			creds.Password)
-
-		// write the output line if there is anything present
-		if _, err = cf.WriteString(output); err != nil {
-			// log the error then panic
-			// TODO - maybe a little harsh to kill the entire process here?
-			log.Panic(err)
-		}
-
+	// create and start the log file
+	log.Printf("Opening fake log file: %s", filename)
+	file1, err := os.OpenFile(filename, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		log.Printf("Error creating file: %s", err)
 	}
+	log1 := log.New(file1, "", log.LstdFlags)
 
-	// Add Mountain endpoints to the config file
-	for _, nodeCi := range currentMtnNodes {
-		log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
-			nodeCi.NodeName,
-			nodeCi.NodeName)
-		// write the line to the config file
-		output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
-			nodeCi.NodeName,
-			nodeCi.NodeName)
-
-		// write the output line if there is anything present
-		if _, err = cf.WriteString(output); err != nil {
-			// log the error then panic
-			// TODO - maybe a little harsh to kill the entire process here?
-			log.Panic(err)
+	// start a loop that runs forever to write to the log files
+	var lineCnt int64 = 0
+	for {
+		// write out some bulk
+		log1.Print("Start new write:")
+		for i := 0; i < 10; i++ {
+			log1.Printf("%s, %d: ASAS:LDL:KJFSADSDfDSLKJYUIYHIUNMNKJHSDFKJHDSLKJDFHLKJDSFHASKAJUHSDAASDLKJFHLKJHADSLKJDSHFLKJDHFSD:OUISDFLKDJFHASLJKFHDKJFH", xname, lineCnt)
+			lineCnt++
 		}
 
+		// wait before writing out again
+		time.Sleep(sleepTime)
 	}
 }

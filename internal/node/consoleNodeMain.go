@@ -65,7 +65,6 @@ func setPodName() {
 		log.Printf("Pod name found: %s", podName)
 	} else {
 		// not found, so as stopgap make random number > 1000
-		rand.Seed(time.Now().UnixNano())
 		r := rand.Intn(2000) + 1000 // Random number between [1000,3000)
 		podName = "cray-console-node-" + strconv.Itoa(r)
 		log.Printf("Error: Pod name not set in env - defaulting to random id: %s", podName)
@@ -252,19 +251,6 @@ func releaseAllNodes() {
 
 	// release the nodes from console-data
 	releaseNodes(rn)
-}
-
-// Utility function to ensure that a directory exists
-func ensureDirPresent(dir string, perm os.FileMode) (bool, error) {
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		log.Printf("Directory does not exist, creating: %s", dir)
-		err = os.MkdirAll(dir, perm)
-		if err != nil {
-			log.Printf("Unable to create dir: %s", err)
-			return false, err
-		}
-	}
-	return true, nil
 }
 
 // Function to read a single env variable into a variable with min/max checks
