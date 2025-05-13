@@ -1,58 +1,115 @@
-#
-# MIT License
-#
-# (C) Copyright 2021-2022 Hewlett Packard Enterprise Development LP
-#
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-# OTHER DEALINGS IN THE SOFTWARE.
-#
-
+#THIS environment sets up all of RCS
+#  All dependencies -> HSM (vault, hm-collector, kafka), RTS (red fish sims) are all setup and active.
+#  The RCS binary is active
+#  NO ports are exposed to the local system.
+#  This will be used for integration testing
 networks:
-  host:
+  rcs:
 
 services:
-  condat-postgres:
-    hostname: console-data-cray-console-data-postgres
-    image: docker.io/postgres:11-alpine
-    environment:
-      - POSTGRES_PASSWORD=console
-      - POSTGRES_USER=console
-      - POSTGRES_DB=console
-    networks:
-      - host
-    healthcheck:
-      test: ["CMD", "psql", "-U", "console"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-  cray-console-data:
+  integration-tests:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.integration.test
     environment:
-      - POSTGRES_HOST=condat-postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=console
-      - POSTGRES_USER=console
-      - POSTGRES_PASSWD=console
-    hostname: cray-console-data
+      - API_URL=http://remote-console
+      - API_SERVER_PORT=:28007
     depends_on:
-      condat-postgres:
-        condition: service_healthy
+      - remote-console
     networks:
-      - host
+      - rcs
+  remote-console:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration.Dockerfile
+    environment:
+      - SMS_SERVER=http://smd:27779
+      - CRAY_VAULT_AUTH_PATH=auth/token/create
+      - CRAY_VAULT_ROLE_FILE=configs/namespace
+      - CRAY_VAULT_JWT_FILE=configs/token
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - VAULT_KEYPATH=hms-creds
+      - VAULT_SKIP_VERIFY=true
+      - VAULT_ENABLED=true
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      - smd
+    networks:
+      - rcs
+  vault:
+    hostname: vault
+    image: docker.io/library/vault:1.5.5
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=hms
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_ADDR=http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - rcs
+  vault-kv-enabler:
+    build:
+      context: .
+      dockerfile: vault-kv-enabler.dockerfile
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - KV_STORES=hms-creds
+    depends_on:
+      - vault
+    networks:
+      - rcs
+  postgres:
+    hostname: postgres
+    image: docker.io/library/postgres:11-alpine
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_DB=hmsds
+    networks:
+      - rcs
+  smd-init:
+    image: ghcr.io/openchami/smd:2.17
+    environment:
+      - SMD_DBHOST=postgres
+      - SMD_DBPORT=5432
+      - SMD_DBNAME=hmsds
+      - SMD_DBUSER=${POSTGRES_USER:-postgres}
+      - SMD_DBPASS=${POSTGRES_PASSWORD:-postgres}
+      - SMD_DBOPTS=sslmode=disable
+    depends_on:
+      - postgres
+    networks:
+      - rcs
+    command: /smd-init
+  smd:
+    image: ghcr.io/openchami/smd:2.17
+    environment:
+      - SMD_DBHOST=postgres
+      - SMD_DBPORT=5432
+      - SMD_DBNAME=hmsds
+      - SMD_DBUSER=${POSTGRES_USER:-postgres}
+      - SMD_DBPASS=${POSTGRES_PASSWORD:-postgres}
+      - SMD_DBOPTS=sslmode=disable
+      - SMD_JWKS_URL=
+      - RF_MSG_HOST=kafka:9092:cray-dmtf-resource-event
+      - CRAY_VAULT_AUTH_PATH=auth/token/create
+      - CRAY_VAULT_ROLE_FILE=configs/namespace
+      - CRAY_VAULT_JWT_FILE=configs/token
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - VAULT_KEYPATH=hms-creds
+      - SMD_WVAULT=true
+      - SMD_RVAULT=true
+      - SMD_SLS_HOST=
+      - SMD_HBTD_HOST=
+    volumes:
+      - ./configs/namespace:/configs/namespace
+      - ./configs/token:/configs/token
+    hostname: smd
+    depends_on:
+      - smd-init
+      - vault
+    networks:
+      - rcs

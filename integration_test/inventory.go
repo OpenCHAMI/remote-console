@@ -36,6 +36,12 @@ import (
 	"time"
 )
 
+func debugListNodes(testName string) {
+
+	// ok
+	pass(testName)
+}
+
 // Struct to hold all node level information needed to form a console connection
 type NodeConsoleInfo struct {
 	NodeName        string `json:"nodename"`        // node xname

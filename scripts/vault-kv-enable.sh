@@ -1,7 +1,7 @@
-#
+#!/usr/bin/env bash
 # MIT License
 #
-# (C) Copyright 2021-2022 Hewlett Packard Enterprise Development LP
+# (C) Copyright [2020-2023] Hewlett Packard Enterprise Development LP
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -20,25 +20,29 @@
 # OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
-#
-# This file only exists as a means to run tests in an automated fashion.
 
-FROM docker.io/library/golang:1.24-alpine AS testbase
+IFS=','
 
-RUN set -ex \
-    && apk add --upgrade --no-cache apk-tools \
-    && apk update \
-    && apk add build-base \
-    && apk -U upgrade --no-cache
+vault_host_port=$(echo "$VAULT_ADDR" | awk -F[/] '{print $3}')
+vault_host=$(echo "$vault_host_port" | cut -d ':' -f 1)
+vault_port=$(echo "$vault_host_port" | cut -d ':' -f 2)
 
-# Configure go env - installed as package but not quite configured
-ENV GOPATH=/usr/local/golib
-RUN export GOPATH=$GOPATH
+echo "Waiting for Vault ($vault_host:$vault_port) to become ready..."
 
-# Copy in all the necessary files
-COPY integration_test/*.go $GOPATH/src/
-COPY integration_test/go.* $GOPATH/src/
-RUN (cd $GOPATH/src/;  go build -v -o /app/remote_console_integration_test)
+./wait-for.sh "$vault_host":"$vault_port" -- echo 'Vault ready.'
 
-# Build the image and run the tests.
-RUN set -ex && /app/remote_console_integration_test
+set -ex
+
+vault login "$VAULT_TOKEN"
+
+# Rename the v2 kv-store, so we can create a v1 kv-store named secret
+vault secrets move secret/ secret-v2/
+
+read -ra STORE <<<"$KV_STORES"
+for store in "${STORE[@]}"; do
+  echo "Enabling $store..."
+  vault secrets enable -path="$store" kv
+done
+
+exit 0
+

@@ -41,7 +41,7 @@ RUN go env -w GO111MODULE=auto
 # Build the image
 COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
 #COPY configs configs
-COPY scripts scripts
+#COPY scripts scripts
 COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
 COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
 COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
@@ -54,17 +54,11 @@ FROM docker.io/alpine:3 AS base
 
 # Copy in the needed files
 COPY --from=build /usr/local/bin/remote-console /app/
-COPY scripts/conman.conf /app/conman_base.conf
-COPY scripts/conman.conf /etc/conman.conf
-COPY scripts/ssh-key-console /usr/bin
-COPY scripts/ssh-pwd-console /usr/bin
 
 # Install needed packages
 # NOTE: setcap allows non-root users to bind to port 80 for a specific application
 RUN set -eux \
     && apk add --upgrade --no-cache apk-tools \
-    && apk add --upgrade --no-cache coreutils \
-    && apk add --upgrade --no-cache tini \
     && apk update \
     && apk add --no-cache libcap \
     && apk -U upgrade --no-cache \
@@ -74,10 +68,6 @@ RUN echo 'alias ll="ls -l"' > ~/.bashrc
 RUN echo 'alias vi="vim"' >> ~/.bashrc
 
 # set to run as user 'nobody'
-# Change ownership of the app dir and switch to user 'nobody'
-RUN chown -Rv 65534:65534 /app /etc/conman.conf
 USER 65534:65534
 
-CMD [ "/app/remote-console" ]
-
-ENTRYPOINT [ "/sbin/tini", "--" ]
+ENTRYPOINT ["/bin/false"]

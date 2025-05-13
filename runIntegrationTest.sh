@@ -62,8 +62,7 @@ ${docker_compose_exe} up  -d --build
 network_name=${COMPOSE_PROJECT_NAME}_host
 # Note that this will both build the test image and execute the tests.
 # Any failure will indicate a test failure.
-echo "using  ${network_name}"
-DOCKER_BUILDKIT=0 docker build --rm --no-cache --network ${network_name} -f Dockerfile.integration.test .
+DOCKER_BUILDKIT=0 docker build --rm --no-cache -f Dockerfile.integration.test .
 test_result=$?
 
 # Clean up

@@ -1,0 +1,60 @@
+#!/usr/bin/expect --
+
+# Copyright 2024 Hewlett Packard Enterprise Development LP
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.
+#
+# (MIT License)
+
+# This can be called from within the context of conman to
+# establish an ssh connection to a node console requiring a user name
+# and password to authenticate.
+# Usage and examples below assume this script's name is
+# ssh-pwd-console and located on the system under /usr/bin
+#
+# Usage: ssh-console xname
+#  Example: ssh-pwd-console x5000c3s6b0n0 USER PASSWORD
+#
+# Example /etc/conman.conf entry:
+# console name="x3000c0s33b4n0" dev="/app/ssh-pwd-console x3000c0s33b4 USER PASSWORD"
+#
+
+set env(TERM) xterm
+
+set timeout -1
+set bmc [lindex $argv 0]
+set usr [lindex $argv 1]
+set paswd [lindex $argv 2]
+
+# connect to an ssh session
+set pid [spawn ssh -p 2200 -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $usr@$bmc ]
+
+# reply with the password when challenged
+expect "password: "
+send -- "$paswd\r"
+
+# set up the exit condition to kill the ssh session
+exit -onexit {
+  exec kill $pid
+  wait $pid
+  exp_exit
+}
+
+# go into interactive mode
+interact

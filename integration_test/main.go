@@ -37,9 +37,7 @@ import (
 // Test name -> test function name
 // (Add your new test here...)
 var tests = map[string]interface{}{
-	"inventoryCreate":       inventoryCreate,
-	"inventoryCreateVolume": inventoryCreateVolume,
-	"consolePodAcquire":     consolePodAcquire,
+	"debugListNodes": debugListNodes,
 }
 
 // Test metrics
