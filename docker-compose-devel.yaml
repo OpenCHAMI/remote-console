@@ -23,35 +23,102 @@
 #
 
 networks:
-  host:
+  rcs:
 
 services:
-  condat-postgres:
-    hostname: console-data-cray-console-data-postgres
-    image: docker.io/postgres:11-alpine
-    environment:
-      - POSTGRES_PASSWORD=console
-      - POSTGRES_USER=console
-      - POSTGRES_DB=console
-    networks:
-      - host
-    healthcheck:
-      test: ["CMD", "psql", "-U", "console"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-  cray-console-data:
+  remote-console:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
-      - POSTGRES_HOST=condat-postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=console
-      - POSTGRES_USER=console
-      - POSTGRES_PASSWD=console
-    hostname: cray-console-data
-    ports:
-      - "80:80"
+      - SMS_SERVER=http://smd:27779
+      - CRAY_VAULT_AUTH_PATH=auth/token/create
+      - CRAY_VAULT_ROLE_FILE=configs/namespace
+      - CRAY_VAULT_JWT_FILE=configs/token
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - VAULT_KEYPATH=hms-creds
+      - VAULT_SKIP_VERIFY=true
+      - VAULT_ENABLED=true
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      - vault-kv-enabler
+      - smd
     networks:
-      - host
+      - rcs
+  vault:
+    hostname: vault
+    image: docker.io/library/vault:1.5.5
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=hms
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_ADDR=http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - rcs
+  vault-kv-enabler:
+    build:
+      context: .
+      dockerfile: vault-kv-enabler.dockerfile
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - KV_STORES=hms-creds
+    depends_on:
+      - vault
+    networks:
+      - rcs
+  postgres:
+    hostname: postgres
+    image: docker.io/library/postgres:11-alpine
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_DB=hmsds
+    networks:
+      - rcs
+  smd-init:
+    image: ghcr.io/openchami/smd:2.17
+    environment:
+      - SMD_DBHOST=postgres
+      - SMD_DBPORT=5432
+      - SMD_DBNAME=hmsds
+      - SMD_DBUSER=${POSTGRES_USER:-postgres}
+      - SMD_DBPASS=${POSTGRES_PASSWORD:-postgres}
+      - SMD_DBOPTS=sslmode=disable
+    depends_on:
+      - postgres
+    networks:
+      - rcs
+    command: /smd-init
+  smd:
+    image: ghcr.io/openchami/smd:2.17
+    environment:
+      - SMD_DBHOST=postgres
+      - SMD_DBPORT=5432
+      - SMD_DBNAME=hmsds
+      - SMD_DBUSER=${POSTGRES_USER:-postgres}
+      - SMD_DBPASS=${POSTGRES_PASSWORD:-postgres}
+      - SMD_DBOPTS=sslmode=disable
+      - SMD_JWKS_URL=
+      - RF_MSG_HOST=kafka:9092:cray-dmtf-resource-event
+      - CRAY_VAULT_AUTH_PATH=auth/token/create
+      - CRAY_VAULT_ROLE_FILE=configs/namespace
+      - CRAY_VAULT_JWT_FILE=configs/token
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - VAULT_KEYPATH=hms-creds
+      - SMD_WVAULT=true
+      - SMD_RVAULT=true
+      - SMD_SLS_HOST=
+      - SMD_HBTD_HOST=
+    volumes:
+      - ./configs/namespace:/configs/namespace
+      - ./configs/token:/configs/token
+    hostname: smd
+    depends_on:
+      - smd-init
+      - vault
+    networks:
+      - rcs

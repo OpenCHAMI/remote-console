@@ -72,5 +72,6 @@ if [[ $test_result -ne 0 ]]; then
   cleanup 1
 fi
 
+docker logs integtest-remote-console-1
 echo "Console data integration tests PASSED!"
 cleanup 0
