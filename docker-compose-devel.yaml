@@ -41,6 +41,9 @@ services:
       - VAULT_SKIP_VERIFY=true
       - VAULT_ENABLED=true
       - LOG_LEVEL=DEBUG
+    volumes:
+      - ./configs/namespace:/configs/namespace
+      - ./configs/token:/configs/token
     depends_on:
       - vault-kv-enabler
       - smd
@@ -120,5 +123,87 @@ services:
     depends_on:
       - smd-init
       - vault
+    ports:
+      - "27779:27779"
     networks:
       - rcs
+
+  #
+  # Emulator
+  #
+  emulator-loader:
+    image: library/golang:1.24-alpine
+    platform: linux/arm64
+    command: >
+      sh -c "apk add curl && sleep 10 &&
+      curl -X POST -d '{\"RedfishEndpoints\":[{
+        \"ID\":\"x0c0b0\",
+        \"FQDN\":\"x0c0b0\",
+        \"RediscoverOnUpdate\":true,
+        \"User\":\"root\",
+        \"Password\":\"root_password\"
+      },{
+        \"ID\":\"x0c0s1b0\",
+        \"FQDN\":\"x0c0s1b0\",
+        \"RediscoverOnUpdate\":true,
+        \"User\":\"root\",
+        \"Password\":\"root_password\"
+      },{
+        \"ID\":\"x0c0r2b0\",
+        \"FQDN\":\"x0c0r2b0\",
+        \"RediscoverOnUpdate\":true,
+        \"User\":\"root\",
+        \"Password\":\"root_password\"}]}' http://smd:27779/hsm/v2/Inventory/RedfishEndpoints"
+    depends_on:
+      - smd
+      - rfemulator0
+      - rfemulator1
+      - rfemulator2
+    networks:
+      - rcs
+
+  rfemulator0:
+    hostname: x0c0b0
+    image: ghcr.io/openchami/csm-rie:v1.6.7
+    environment:
+      - MOCKUPFOLDER=CMM
+      - XNAME=x0c0b0
+      # - "AUTH_CONFIG=root:root_password:Administrator"
+      - PORT=443
+    ports:
+      - "5000:443"
+    networks:
+      rcs:
+        aliases:
+          - x0c0b0
+
+  rfemulator1:
+    hostname: x0c0s1b0
+    image: ghcr.io/openchami/csm-rie:v1.6.7
+    environment:
+      - MOCKUPFOLDER=EX235a
+      - MAC_SCHEMA=Mountain
+      - XNAME=x0c0s1b0
+      # - "AUTH_CONFIG=root:root_password:Administrator"
+      - PORT=443
+    ports:
+      - "5001:443"
+    networks:
+      rcs:
+        aliases:
+          - x0c0s1b0
+
+  rfemulator2:
+    hostname: x0c0r2b0
+    image: ghcr.io/openchami/csm-rie:v1.6.7
+    environment:
+      - MOCKUPFOLDER=Slingshot_Switch_Blade
+      - XNAME=x0c0r2b0
+      # - "AUTH_CONFIG=root:root_password:Administrator"
+      - PORT=443
+    ports:
+      - "5002:443"
+    networks:
+      rcs:
+        aliases:
+          - x0c0r2b0

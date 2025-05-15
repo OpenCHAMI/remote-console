@@ -40,7 +40,7 @@ RUN go env -w GO111MODULE=auto
 
 # Build the image
 COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
-#COPY configs configs
+COPY configs configs
 COPY scripts scripts
 COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
 COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
@@ -58,6 +58,7 @@ COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin
 COPY scripts/ssh-pwd-console /usr/bin
+COPY configs /app/configs
 
 # Install needed packages
 # NOTE: setcap allows non-root users to bind to port 80 for a specific application
@@ -75,7 +76,9 @@ RUN echo 'alias vi="vim"' >> ~/.bashrc
 
 # set to run as user 'nobody'
 # Change ownership of the app dir and switch to user 'nobody'
-RUN chown -Rv 65534:65534 /app /etc/conman.conf
+RUN mkdir /var/log/conman/
+RUN mkdir /var/log/conman.old/
+RUN chown -Rv 65534:65534 /app /etc/conman.conf /var/log/conman/ /var/log/conman.old/
 USER 65534:65534
 
 CMD [ "/app/remote-console" ]
