@@ -31,7 +31,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - SMS_SERVER=http://smd:27779
+      - SMD_URL=http://smd:27779/
       - CRAY_VAULT_AUTH_PATH=auth/token/create
       - CRAY_VAULT_ROLE_FILE=configs/namespace
       - CRAY_VAULT_JWT_FILE=configs/token
@@ -46,6 +46,7 @@ services:
       - ./configs/token:/configs/token
     depends_on:
       - vault-kv-enabler
+      - emulator-loader
       - smd
     networks:
       - rcs
