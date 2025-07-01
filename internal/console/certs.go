@@ -48,7 +48,7 @@ const mountainConsoleKeyPub string = "/var/log/console/conman.key.pub"
 const svcAcctTokenFile string = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
 // The Vault base URI
-const vaultBase = "http://cray-vault.vault:8200/v1"
+var VaultBase = "http://cray-vault.vault:8200/v1"
 
 // The Vault specific secret name of the Conman Mountain BMC console private key.
 // If this secret does not exist Vault will be asked to create it.
