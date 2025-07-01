@@ -88,7 +88,7 @@ func vaultGeneratePrivateKey(vaultToken string) (response []byte, responseCode i
 	}
 
 	// Tell vault to create the private key
-	URL := vaultBase + "/transit/keys/" + vaultBmcKeyName
+	URL := VaultBase + "/transit/keys/" + vaultBmcKeyName
 	vaultRequestHeaders := make(map[string]string)
 	vaultRequestHeaders["X-Vault-Token"] = vaultToken
 	response, responseCode, err = postURL(URL, jsonVaultParam, vaultRequestHeaders)
@@ -114,7 +114,7 @@ func vaultGeneratePrivateKey(vaultToken string) (response []byte, responseCode i
 
 // Ask vault for the private key
 func vaultExportPrivateKey(vaultToken string) (pvtKey string, response []byte, responseCode int, err error) {
-	URL := vaultBase + "/transit/export/signing-key/" + vaultBmcKeyName
+	URL := VaultBase + "/transit/export/signing-key/" + vaultBmcKeyName
 	vaultRequestHeaders := make(map[string]string)
 	vaultRequestHeaders["X-Vault-Token"] = vaultToken
 	response, responseCode, err = getURL(URL, vaultRequestHeaders)
@@ -122,9 +122,9 @@ func vaultExportPrivateKey(vaultToken string) (pvtKey string, response []byte, r
 	if err != nil {
 		log.Printf(
 			"Unable to get the %s secret from vault: %s  Error was: %s",
-			vaultBmcKeyName, vaultBase, err)
+			vaultBmcKeyName, VaultBase, err)
 		return "", response, responseCode, fmt.Errorf("Unable to get the %s secret from vault: %s  Error was: %s",
-			vaultBmcKeyName, vaultBase, err)
+			vaultBmcKeyName, VaultBase, err)
 	}
 
 	if responseCode == 404 {
@@ -222,7 +222,7 @@ func vaultGetMountainConsoleCredentials() error {
 		"jwt":  string(svcAcctToken),
 		"role": "ssh-user-certs-compute"}
 	jsonVaultAuthParam, _ := json.Marshal(vaultAuthParam)
-	URL := vaultBase + "/auth/kubernetes/login"
+	URL := VaultBase + "/auth/kubernetes/login"
 	log.Printf("Attempting to authenticate to Vault at: %s", URL)
 	response, responseCode, err := postURL(URL, jsonVaultAuthParam, nil)
 	if err != nil {
