@@ -58,6 +58,7 @@ COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin
 COPY scripts/ssh-pwd-console /usr/bin
+COPY scripts/ssh-pwd-mtn-console /usr/bin
 COPY configs /app/configs
 
 # Install needed packages
