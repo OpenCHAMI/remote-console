@@ -1,0 +1,134 @@
+version: 2.4
+
+project_name: remote-console
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+
+builds:
+  - id: remote-console
+    main: ./cmd/remote-console
+    binary: remote-console
+    goos:
+      - linux
+    goarch:
+      - amd64
+      # TODO We want ARM builds, but need ARM base images and conman packages for this.
+      #- arm64
+    goamd64:
+      - v3
+    env:
+      - CGO_ENABLED=1
+      - >-
+        {{- if eq .Os "linux" }}
+          {{- if eq .Arch "arm64"}}CC=aarch64-linux-gnu-gcc{{- end }}
+        {{- end }}
+
+    ldflags:
+      - "-s -w -X main.GitCommit={{.Commit}} \
+         -X main.BuildTime={{.Timestamp}} \
+         -X main.Version={{.Version}} \
+         -X main.GitBranch={{.Branch}} \
+         -X main.GitTag={{.Tag}} \
+         -X main.GitState={{ .Env.GIT_STATE }} \
+         -X main.BuildHost={{ .Env.BUILD_HOST }} \
+         -X main.GoVersion={{ .Env.GO_VERSION }} \
+         -X main.BuildUser={{ .Env.BUILD_USER }} "
+
+dockers:
+  - image_templates:
+      - &amd64_linux_image ghcr.io/openchami/{{.ProjectName}}:{{ .Tag }}-amd64
+      - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}-amd64
+      - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}.{{ .Minor }}-amd64
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--target=ubuntu-goreleaser"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+    goarch: amd64
+    goamd64: v3
+    extra_files:
+      - LICENSE
+      - CHANGELOG.md
+      - README.md
+      - configs/
+      - scripts/
+
+  # TODO: more ARM config that isn't viable yet.
+  #- image_templates:
+  #    - &arm64v8_linux_image ghcr.io/openchami/{{.ProjectName}}:{{ .Tag }}-arm64
+  #    - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}-arm64
+  #    - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}.{{ .Minor }}-arm64
+  #  use: buildx
+  #  build_flag_templates:
+  #    - "--pull"
+  #    - "--platform=linux/arm64"
+  #    - "--label=org.opencontainers.image.created={{.Date}}"
+  #    - "--label=org.opencontainers.image.title={{.ProjectName}}"
+  #    - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+  #    - "--label=org.opencontainers.image.version={{.Version}}"
+  #  goarch: arm64
+  #  extra_files:
+  #    - LICENSE
+  #    - CHANGELOG.md
+  #    - README.md
+  #    - configs/
+
+docker_manifests:
+  # TODO: ARM ARM ARM
+  - name_template: "ghcr.io/openchami/{{.ProjectName}}:latest"
+    image_templates:
+      - *amd64_linux_image
+      #- *arm64v8_linux_image
+
+  - name_template: "ghcr.io/openchami/{{.ProjectName}}:{{ .Tag }}"
+    image_templates:
+      - *amd64_linux_image
+      #- *arm64v8_linux_image
+
+  - name_template: "ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}"
+    image_templates:
+      - *amd64_linux_image
+      #- *arm64v8_linux_image
+
+  - name_template: "ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - *amd64_linux_image
+      #- *arm64v8_linux_image
+
+archives:
+  - formats: ["tar.gz"]
+    # this name template makes the OS and Arch compatible with the results of uname.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - CHANGELOG.md
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+
+# The lines beneath this are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
