@@ -122,11 +122,12 @@ func main() {
 		log.Printf("Info: Detected signal to close service: %s", sig)
 
 		// Shutdown signal with grace period of 30 seconds
-		shutdownCtx, _ := context.WithTimeout(serverCtx, 30*time.Second)
+		shutdownCtx, shutdownCtxCancel := context.WithTimeout(serverCtx, 30*time.Second)
 
 		go func() {
 			<-shutdownCtx.Done()
 			if shutdownCtx.Err() == context.DeadlineExceeded {
+				shutdownCtxCancel()
 				log.Fatal("graceful shutdown timed out.. forcing exit.")
 			}
 		}()
