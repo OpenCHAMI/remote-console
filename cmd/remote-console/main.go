@@ -36,12 +36,7 @@ import (
 	"syscall"
 	"time"
 
-	c "github.com/evanmcc/remote-console/internal/console"
-	// base "github.com/Cray-HPE/hms-base/v2"
-	// "github.com/Cray-HPE/hms-certs/pkg/hms_certs"
-	// trsapi "github.com/Cray-HPE/hms-trs-app-api/v3/pkg/trs_http_api"
-	// "github.com/namsral/flag"
-	// "github.com/sirupsen/logrus"
+	"github.com/OpenCHAMI/remote-console/internal/console"
 )
 
 var (
@@ -68,21 +63,21 @@ func main() {
 	debugLog.Init()
 
 	// allow for changes in the SMD URL
-	c.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
-	c.DebugOnly = getEnv("DEBUG", "false") == "true"
-	c.VaultBase = getEnv("VAULT_URL", "http://cray-vault.vault:8200/v1")
+	console.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
+	console.DebugOnly = getEnv("DEBUG", "false") == "true"
+	console.VaultBase = getEnv("VAULT_URL", "http://cray-vault.vault:8200/v1")
 	svcHost = getEnv("SVC_HOST", "0.0.0.0:80")
 
 	log.Printf("Remote console service starting")
 	// Set up the zombie killer
 	log.Printf("Starting zombie killer...")
-	go c.WatchForZombies()
+	go console.WatchForZombies()
 
 	// first we set up the goroutine that polls the hsm
-	go c.WatchHardware()
+	go console.WatchHardware()
 
 	// then we set up the goroutine that controls conman
-	c.EnsureDirPresent("/var/log/conman", 666)
+	console.EnsureDirPresent("/var/log/conman", 666)
 
 	// I am not sure that we need this, so I am leaving it out for
 	// now, I think that normal logging will work now that we only
@@ -90,17 +85,17 @@ func main() {
 	// respinAggLog()
 
 	// Initialize and start log rotation
-	c.LogRotate()
+	console.LogRotate()
 
 	// spin a thread that watches for changes in console configuration
 	log.Printf("Starting hardware watch loop...")
-	go c.WatchForNodes()
+	go console.WatchForNodes()
 
 	// start up the thread that runs conman
-	go c.RunConman()
+	go console.RunConman()
 
 	// start the thread that will make sure that the conman creds are correct
-	go c.CredMonitor()
+	go console.CredMonitor()
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs
@@ -111,14 +106,14 @@ func main() {
 
 	// signal to cleanly shut down
 	go func() {
-		c.SetupRoutes()
+		console.SetupRoutes()
 		// NOTE: do not use log.Fatal as that will immediately exit
 		// the program and short-circuit the shutdown logic below
-		log.Printf("Info: Server %s\n", http.ListenAndServe(svcHost, c.RequestRouter))
+		log.Printf("Info: Server %s\n", http.ListenAndServe(svcHost, console.RequestRouter))
 	}()
 
 	// Server run context
-	server := &http.Server{Addr: svcHost, Handler: c.RequestRouter}
+	server := &http.Server{Addr: svcHost, Handler: console.RequestRouter}
 	serverCtx, serverStopCtx := context.WithCancel(context.Background())
 
 	// Listen for syscall signals for process to interrupt/quit
