@@ -28,7 +28,6 @@ package console
 
 import (
 	"log"
-	"os"
 	"time"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
@@ -107,52 +106,4 @@ func getPasswords(bmcXNames []string) map[string]compcreds.CompCredentials {
 	}
 
 	return ccreds
-}
-
-// TODO: determine lock status?
-// Ensure that CertSSH node console key files are present.
-func ensureCertSSHKeysPresent() {
-	// NOTE: in update config thread
-
-	// if running in debug mode there won't be any nodes or vault present
-	if DebugOnly {
-		log.Print("Running in debug mode - skipping mountain cred generation")
-		return
-	}
-
-	// The ssh key files are created and deployed by console-operator
-	// be we want to make sure they exist before continuing to
-	// deploy conmand
-	haveSSHNodes := false
-	for _, node := range currentNodes {
-		// just one is enough
-		if node.isCertSSH() {
-			haveSSHNodes = true
-			break
-		}
-	}
-
-	// if there are no mountain nodes, no need to wait
-	if !haveSSHNodes {
-		log.Printf("No cert nodes configured, not checking for keys")
-		return
-	}
-
-	// spin forever waiting for keys to be created
-	for {
-		// Check that we have key pair files on local storage
-		_, errKey := os.Stat(sshConsoleKey)
-		_, errPub := os.Stat(sshConsoleKeyPub)
-		noKey := os.IsNotExist(errKey) || os.IsNotExist(errPub)
-
-		if !noKey {
-			// keys exist so done
-			log.Printf("cert ssh key files exist")
-			return
-		}
-
-		// keys do not exist, wait and try again
-		log.Printf("cert ssh keys do not exist - waiting for them...")
-		time.Sleep(5 * time.Second)
-	}
 }
