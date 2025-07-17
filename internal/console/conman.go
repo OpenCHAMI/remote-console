@@ -335,12 +335,12 @@ func updateConfigFile(forceUpdate bool) {
 			}
 			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-mtn-console %s %s REDACTED\"\n",
 				nci.NodeName,
-				nci.BmcFqdn,
+				nci.NodeName,
 				creds.Username)
 			// write the line to the config file
 			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-mtn-console %s %s %s\"\n",
 				nci.NodeName,
-				nci.BmcFqdn,
+				nci.NodeName,
 				creds.Username,
 				creds.Password)
 
