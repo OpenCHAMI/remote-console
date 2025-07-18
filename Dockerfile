@@ -112,7 +112,6 @@ RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console /usr/bin/ssh-pw
 RUN mkdir -p /var/log/conman/ /var/log/conman.old/ \
     && chown -Rv 65534:65534 /app /etc/conman.conf /var/log/conman/ /var/log/conman.old/
 
-# Optionally run as 'nobody' does not work in k8s
-#USER 65534:65534
+USER 65534:65534
 
 ENTRYPOINT ["/app/remote-console"]
