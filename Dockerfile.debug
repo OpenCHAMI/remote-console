@@ -1,0 +1,57 @@
+FROM golang:1.24-bookworm
+
+# Configure go env
+ENV GOPATH=/usr/local/golib
+RUN export GOPATH=$GOPATH
+RUN go env -w GO111MODULE=auto
+RUN export CGO_ENABLED=0
+
+# Copy source files
+COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
+COPY configs configs
+COPY scripts scripts
+COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
+COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
+COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
+
+# Build the image
+RUN go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v \
+    -gcflags=all="-N -l" \
+    -o /usr/local/bin/remote-console
+
+RUN set -eux \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ipmitool \
+        libfreeipmi17 \
+        libipmiconsole2 \
+        iputils-ping \
+        coreutils \
+        conman \
+        libcap2-bin \
+        expect \
+        openssh-client \
+        sshpass \
+        vim \
+        bash \
+        jq \
+        inotify-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/conman.conf /app/conman_base.conf
+COPY scripts/conman.conf /etc/conman.conf
+COPY scripts/ssh-key-console /usr/bin/
+COPY scripts/ssh-pwd-console /usr/bin/
+COPY scripts/ssh-pwd-mtn-console /usr/bin/
+COPY configs /app/configs
+RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console /usr/bin/ssh-pwd-mtn-console
+
+RUN mkdir -p /var/log/conman/ /var/log/conman.old/ \
+    && chown -Rv 65534:65534 /app /etc/conman.conf /var/log/conman/ /var/log/conman.old/
+
+RUN go install github.com/go-delve/delve/cmd/dlv@v1.24.0
+
+USER 65534:65534
+
+ENTRYPOINT ["/usr/local/golib/bin/dlv"]
+CMD ["exec", "--continue", "--accept-multiclient",  "--headless", "--api-version=2", "--listen=:2345", "--log", "/usr/local/bin/remote-console"]
