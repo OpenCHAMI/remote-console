@@ -80,29 +80,12 @@ func updateCachedNodeData() (bool, []nodeConsoleInfo) {
 }
 
 // Function to do a hardware update check
-func doHardwareUpdate(mountainCredsUpdateChannel chan nodeConsoleInfo) bool {
+func doHardwareUpdate() bool {
 	// record the time of the hardware update attempt
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 
 	// Update the cache and data in console-data
-	updateSuccessful, newNodes := updateCachedNodeData()
-
-	certNodes := make([]nodeConsoleInfo, 0)
-	for _, n := range newNodes {
-		if n.isCertSSH() {
-			certNodes = append(certNodes, n)
-		}
-	}
-
-	// Update mountain node keys
-	if len(certNodes) > 0 {
-		// Generate keys for mountain nodes if needed
-		ensureCertSSHKeysPresent()
-
-		for _, n := range certNodes {
-			mountainCredsUpdateChannel <- n
-		}
-	}
+    updateSuccessful, _ := updateCachedNodeData()
 
 	// return status
 	return updateSuccessful
@@ -110,9 +93,6 @@ func doHardwareUpdate(mountainCredsUpdateChannel chan nodeConsoleInfo) bool {
 
 // Main loop for console-operator stuff
 func WatchHardware() {
-	// setup routine for pushing mountain keys
-	mountainCredsUpdateChannel := make(chan nodeConsoleInfo, 100)
-	go doMountainCredsUpdates(mountainCredsUpdateChannel)
 
 	// loop forever looking for updates to the hardware
 	for {
@@ -121,7 +101,7 @@ func WatchHardware() {
 		//  do not perform the hardware update check
 		if !inShutdown {
 			// do the update
-			_ = doHardwareUpdate(mountainCredsUpdateChannel)
+			_ = doHardwareUpdate()
 		}
 
 		// There are times we want to wait for a little before starting a new

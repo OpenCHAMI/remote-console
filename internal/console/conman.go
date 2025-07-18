@@ -61,12 +61,6 @@ func configConman(forceConfigUpdate bool) bool {
 		aggregateFile(xname)
 	}
 
-	// Make sure that we have a proper ssh console keypair deployed
-	// here and on the Mountain BMCs before starting conman.
-	// NOTE: this function will wait to return until keys are
-	//  present if there are Mountain consoles to configure
-	ensureCertSSHKeysPresent()
-
 	// return if there are any nodes
 	return len(currentNodes) > 0
 }
@@ -272,11 +266,15 @@ func updateConfigFile(forceUpdate bool) {
 	// collect the creds for the IPMI and PassSSH endpoints
 	var ipmiXNames []string = make([]string, 0)
 	for _, nci := range currentNodes {
-		if nci.isIPMI() {
-			ipmiXNames = append(ipmiXNames, nci.BmcName)
-		} else if nci.isPassSSH() {
-			ipmiXNames = append(ipmiXNames, nci.BmcName)
-		}
+		// This originally had logic to switch between key-based authentication and password-based
+		// authentication in v2.11.0, when remote-console was originally derived from the separate CSM 
+		// cray-console-node, cray-console-operator, and cray-console-data services. This requires SCSD
+		// (https://github.com/Cray-HPE/hms-scsd) to manage key distribution.
+		// OpenCHAMI doesn't have an SCSD equivalent as of v2.11.0, so this supports password auth
+		// only. Compare against v2.11.0 to see how the original logic worked.
+		// Ref: https://github.com/OpenCHAMI/remote-console/issues/7
+		// Ref: https://github.com/OpenCHAMI/remote-console/pull/12
+		ipmiXNames = append(ipmiXNames, nci.BmcName)
 	}
 
 	// gather passwords
@@ -336,14 +334,23 @@ func updateConfigFile(forceUpdate bool) {
 				log.Panic(err)
 			}
 
-		} else if nci.isCertSSH() {
-			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
+		} else if nci.isCertSSH() { //TODO rename cert ssh since we
+			//just use passwords for everything.  also need to fix
+			// this to have the node name etc
+			creds, ok := passwords[nci.BmcName]
+			if !ok {
+				log.Printf("No creds record returned for %s", nci.BmcName)
+			}
+			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-mtn-console %s %s REDACTED\"\n",
 				nci.NodeName,
-				nci.NodeName)
+				nci.NodeName,
+				creds.Username)
 			// write the line to the config file
-			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
+			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-mtn-console %s %s %s\"\n",
 				nci.NodeName,
-				nci.NodeName)
+				nci.NodeName,
+				creds.Username,
+				creds.Password)
 
 			// write the output line if there is anything present
 			if _, err = cf.WriteString(output); err != nil {
@@ -351,7 +358,6 @@ func updateConfigFile(forceUpdate bool) {
 				// TODO - maybe a little harsh to kill the entire process here?
 				log.Panic(err)
 			}
-
 		}
 	}
 }
