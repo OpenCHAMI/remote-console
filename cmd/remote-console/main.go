@@ -65,7 +65,6 @@ func main() {
 	// allow for changes in the SMD URL
 	console.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
 	console.DebugOnly = getEnv("DEBUG", "false") == "true"
-	//console.VaultBase = getEnv("VAULT_URL", "http://cray-vault.vault:8200/v1")
 	svcHost = getEnv("SVC_HOST", "0.0.0.0:80")
 
 	log.Printf("Remote console service starting")
