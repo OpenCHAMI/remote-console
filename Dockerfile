@@ -23,29 +23,6 @@
 #
 # Dockerfile for the console-data service
 
-# Build Stage: Build the Go binary
-FROM golang:1.24-bookworm AS build
-
-RUN set -eux \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends build-essential
-
-# Configure go env
-ENV GOPATH=/usr/local/golib
-RUN export GOPATH=$GOPATH
-RUN go env -w GO111MODULE=auto
-
-# Copy source files
-COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
-COPY configs configs
-COPY scripts scripts
-COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
-COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
-COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
-
-# Build the image
-RUN set -ex && go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v -o /usr/local/bin/remote-console
-
 ### goreleaser Stage ###
 ### Assume goreleaser has already compiled the binary and written it to ./remote-console
 
@@ -54,7 +31,7 @@ FROM ubuntu:24.0 AS ubuntu-goreleaser
 RUN apt -y update
 RUN apt -y install conman less vim ssh jq tar procps inotify-tools
 
-RUN if [ -f remote-console ]; then cp remote-console /app/; fi
+COPY remote-console /app/
 COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin
@@ -70,8 +47,32 @@ RUN echo 'alias vi="vim"' >> /app/bashrc
 
 ENTRYPOINT ["/app/remote-console"]
 
+
+# Build Stage: Build the Go binary
+FROM golang:1.24-bookworm AS builder
+
+RUN set -eux \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends build-essential
+
+# Configure go env
+ENV GOPATH=/usr/local/golib
+#RUN export GOPATH=$GOPATH
+RUN go env -w GO111MODULE=auto
+
+# Copy source files
+COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
+COPY configs configs
+COPY scripts scripts
+COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
+COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
+COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
+
+# Build the image
+RUN set -ex && go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v -o /usr/local/bin/remote-console
+
 ### Final Stage ###
-FROM ubuntu:24.04 AS base
+FROM ubuntu:24.04 AS final
 
 # Install needed packages
 RUN set -eux \
@@ -94,7 +95,7 @@ RUN set -eux \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy in the needed files
-COPY --from=build /usr/local/bin/remote-console /app/
+COPY --from=builder /usr/local/bin/remote-console /app/
 COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin/
@@ -105,6 +106,7 @@ COPY configs /app/configs
 # Aliases
 RUN echo 'alias ll="ls -l"' >> /root/.bashrc
 RUN echo 'alias vi="vim"' >> /root/.bashrc
+RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console /usr/bin/ssh-pwd-mtn-console
 
 # Create log directories and set ownership to nobody (UID/GID 65534)
 RUN mkdir -p /var/log/conman/ /var/log/conman.old/ \
