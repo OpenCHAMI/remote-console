@@ -266,6 +266,14 @@ func updateConfigFile(forceUpdate bool) {
 	// collect the creds for the IPMI and PassSSH endpoints
 	var ipmiXNames []string = make([]string, 0)
 	for _, nci := range currentNodes {
+		// This originally had logic to switch between key-based authentication and password-based
+		// authentication in v2.11.0, when remote-console was originally derived from the separate CSM 
+		// cray-console-node, cray-console-operator, and cray-console-data services. This requires SCSD
+		// (https://github.com/Cray-HPE/hms-scsd) to manage key distribution.
+		// OpenCHAMI doesn't have an SCSD equivalent as of v2.11.0, so this supports password auth
+		// only. Compare against v2.11.0 to see how the original logic worked.
+		// Ref: https://github.com/OpenCHAMI/remote-console/issues/7
+		// Ref: https://github.com/OpenCHAMI/remote-console/pull/12
 		ipmiXNames = append(ipmiXNames, nci.BmcName)
 	}
 
