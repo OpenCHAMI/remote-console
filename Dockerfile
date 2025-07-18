@@ -57,7 +57,7 @@ RUN set -eux \
 
 # Configure go env
 ENV GOPATH=/usr/local/golib
-#RUN export GOPATH=$GOPATH
+RUN export GOPATH=$GOPATH
 RUN go env -w GO111MODULE=auto
 
 # Copy source files
