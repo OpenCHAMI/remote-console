@@ -76,7 +76,10 @@ func main() {
 	go console.WatchHardware()
 
 	// then we set up the goroutine that controls conman
-	console.EnsureDirPresent("/var/log/conman", 666)
+	_, err := console.EnsureDirPresent("/var/log/conman", 0755)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// I am not sure that we need this, so I am leaving it out for
 	// now, I think that normal logging will work now that we only
@@ -141,7 +144,7 @@ func main() {
 
 	// Run the server
 	log.Printf("Info: Console API listening on: %s\n", svcHost)
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
