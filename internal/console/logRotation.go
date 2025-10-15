@@ -46,7 +46,7 @@ const logRotDir string = "/var/log/conman.old"
 // since they need to be specific for this pod, but do not need to
 // be persisted through pod restarts.  They do need to be in locations
 // that are writable by 'nobody' user
-const logRotConfFile string = "/app/logrotate.conman"
+const logRotConfFile string = "./logrotate.conman"
 const logRotStateFile string = "/tmp/rot_conman.state"
 
 // Globals for log rotation parameters

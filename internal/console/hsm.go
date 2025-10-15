@@ -93,16 +93,24 @@ func doHardwareUpdate() bool {
 
 // Main loop for console-operator stuff
 func WatchHardware() {
+	nodeCache["test-console"] = nodeConsoleInfo{
+		NodeName:    "test-console",
+		BmcName: "test-console-bmc",
+		BmcFqdn:  "localhost",
+		Class    : "River",
+		NID      : 1,
+		Role     : "Compute",
+	}
 
 	// loop forever looking for updates to the hardware
 	for {
-		// do a check of the current hardware
-		// NOTE: if the service is currently in the process of shutting down
-		//  do not perform the hardware update check
-		if !inShutdown {
-			// do the update
-			_ = doHardwareUpdate()
-		}
+		// // do a check of the current hardware
+		// // NOTE: if the service is currently in the process of shutting down
+		// //  do not perform the hardware update check
+		// if !inShutdown {
+		// 	// do the update
+		// 	_ = doHardwareUpdate()
+		// }
 
 		// There are times we want to wait for a little before starting a new
 		// process - ie killproc may get caught trying to kill all instances

@@ -41,8 +41,8 @@ import (
 var command *exec.Cmd = nil
 
 // Location of configuration files
-const baseConfFile string = "/app/conman_base.conf"
-const confFile string = "/etc/conman.conf"
+const baseConfFile string = "/home/cjh/work/source/remote-console/conman_base.conf"
+const confFile string = "./conman.conf"
 
 // Do all the steps needed to update configurations for a given conmand process
 func configConman(forceConfigUpdate bool) bool {
@@ -153,7 +153,7 @@ func executeConman() {
 	//   -F : run in foreground
 	//   -v : enable verbose mode for logging
 	//   -c : specify the configuration file
-	command = exec.Command("conmand", "-F", "-v", "-c", confFile)
+	command = exec.Command("conmand", "-F", "-v", "-c", "/home/cjh/work/source/remote-console/conman.conf.test")
 
 	// capture the stderr and stdout pipes from this command
 	cmdStdErr, err := command.StderrPipe()

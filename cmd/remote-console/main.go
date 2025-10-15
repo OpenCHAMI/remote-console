@@ -70,7 +70,7 @@ func main() {
 	log.Printf("Remote console service starting")
 	// Set up the zombie killer
 	log.Printf("Starting zombie killer...")
-	go console.WatchForZombies()
+	//go console.WatchForZombies()
 
 	// first we set up the goroutine that polls the hsm
 	go console.WatchHardware()
@@ -91,7 +91,7 @@ func main() {
 
 	// spin a thread that watches for changes in console configuration
 	log.Printf("Starting hardware watch loop...")
-	go console.WatchForNodes()
+	//go console.WatchForNodes()
 
 	// start up the thread that runs conman
 	go console.RunConman()
@@ -143,13 +143,13 @@ func main() {
 	}()
 
 	// Run the server
-	log.Printf("Info: Console API listening on: %s\n", svcHost)
-	err = server.ListenAndServe()
-	if err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
-	}
+	// log.Printf("Info: Console API listening on: %s\n", svcHost)
+	// err = server.ListenAndServe()
+	// if err != nil && err != http.ErrServerClosed {
+	// 	log.Fatal(err)
+	// }
 
-	// Wait for server context to be stopped
+	// // Wait for server context to be stopped
 	<-serverCtx.Done()
 }
 
