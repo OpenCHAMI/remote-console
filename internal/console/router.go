@@ -25,7 +25,6 @@
 package console
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -33,23 +32,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
-
-type endpointError struct {
-	statusCode int
-	message    string
-}
-
-func (e *endpointError) Error() string {
-	return e.message
-}
-
-// Helper to create API errors
-func newEndpointError(status int, message string) *endpointError {
-	return &endpointError{statusCode: status, message: message}
-}
-
-// Define a handler type that returns an error
-type handlerE func(ctx context.Context, w http.ResponseWriter, r *http.Request) error
 
 func sendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -60,27 +42,6 @@ func sendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 		if err != nil {
 			log.Printf("Error: encoding/sending JSON response: %s\n", err)
 			return
-		}
-	}
-}
-
-// Middleware that wraps your error-returning handlers
-func errorHandler(h handlerE) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		err := h(r.Context(), w, r)
-		if err != nil {
-			// Handle different error types
-			switch e := err.(type) {
-			case *endpointError:
-				SendResponseJSON(w, e.statusCode, map[string]string{
-					"error": e.message,
-				})
-			default:
-				SendResponseJSON(w, http.StatusInternalServerError, map[string]string{
-					"error": "Internal server error",
-				})
-				log.Printf("Internal error: %v", err)
-			}
 		}
 	}
 }
@@ -102,10 +63,10 @@ func SetupRoutes() {
 	RequestRouter.Get("/remote-console/readiness", doReadiness)
 	RequestRouter.Get("/remote-console/health", doHealth)
 
-	// WebSocket console access - tail mode
-	RequestRouter.Get("/remote-console/console/{nodeID}/tail", errorHandler(doTailConsole))
-	// WebSocket console access
-	RequestRouter.Get("/remote-console/console/{nodeID}", errorHandler(doInteractiveConsole))
+	// WebSocket console access endpoints
+	// These handle their own errors via WebSocket close frames after upgrade
+	RequestRouter.Get("/remote-console/console/{nodeID}/tail", doTailConsole)
+	RequestRouter.Get("/remote-console/console/{nodeID}", doInteractiveConsole)
 
 	// debug only routes
 	// router.Get("/remote-console/info", dbs.doInfo)
