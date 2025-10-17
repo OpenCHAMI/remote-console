@@ -40,10 +40,10 @@ type interactiveConsoleSession struct {
 	cancel      context.CancelFunc
 }
 
-// cleanup performs graceful cleanup of the console session
-func (s *interactiveConsoleSession) cleanup() {
+// close performs graceful shutdown of the console session
+func (s *interactiveConsoleSession) close() {
 	s.doneOnce.Do(func() {
-		log.Printf("Starting cleanup for console session: %s", s.nodeID)
+	log.Printf("Starting close for console session: %s", s.nodeID)
 
 		// Cancel context to signal all goroutines
 		if s.cancel != nil {
@@ -86,7 +86,7 @@ func (s *interactiveConsoleSession) cleanup() {
 			s.conn.Close()
 		}
 
-		log.Printf("Cleanup completed for console session: %s", s.nodeID)
+		log.Printf("Close completed for console session: %s", s.nodeID)
 	})
 }
 
@@ -116,12 +116,12 @@ func keepAlive(ctx context.Context, conn *websocket.Conn) {
 	}
 }
 
-// monitorProcess watches for process exit and triggers cleanup
+// monitorProcess watches for process exit and triggers close
 func (s *interactiveConsoleSession) monitorProcess() {
 	s.cmd.Wait()
 	log.Printf("Conman process exited for console: %s", s.nodeID)
 	close(s.processExit)
-	s.cleanup()
+	s.close()
 }
 
 // isEIO checks if an error is an I/O error (EIO)
@@ -145,7 +145,7 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-s.ctx.Done():
-			s.cleanup()
+			s.close()
 			return
 		default:
 			n, err := s.ptmx.Read(buf)
@@ -154,7 +154,7 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 				if err != io.EOF && !isEIO(err) {
 					log.Printf("Error reading from PTY: %v", err)
 				}
-				s.cleanup()
+				s.close()
 				return
 			}
 
@@ -165,7 +165,7 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 						err.Error() != "websocket: close sent" {
 						log.Printf("Failed to write to WebSocket: %v", err)
 					}
-					s.cleanup()
+					s.close()
 					return
 				}
 			}
@@ -180,7 +180,7 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-s.ctx.Done():
-			s.cleanup()
+			s.close()
 			return
 		default:
 			messageType, message, err := s.conn.ReadMessage()
@@ -191,7 +191,7 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 				} else {
 					log.Printf("WebSocket closed normally for console: %s", s.nodeID)
 				}
-				s.cleanup()
+				s.close()
 				return
 			}
 
@@ -199,7 +199,7 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 				// Write user input to PTY
 				if _, err := s.ptmx.Write(message); err != nil {
 					log.Printf("Failed to write to PTY: %v", err)
-					s.cleanup()
+					s.close()
 					return
 				}
 			}
@@ -254,7 +254,7 @@ func newConsoleTailSession(ctx context.Context, nodeID string, conn *websocket.C
 	}
 }
 
-func (cts *consoleTailSession) cleanup() {
+func (cts *consoleTailSession) close() {
 	if cts.tail != nil {
 		log.Printf("cleanup tail")
 		cts.tail.Config.Poll = false
@@ -265,7 +265,7 @@ func (cts *consoleTailSession) cleanup() {
 		}
 	}
 
-	log.Printf("Cleaning up console tail session for: %s", cts.nodeID)
+	log.Printf("Closing console tail session for: %s", cts.nodeID)
 
 	cts.cancel()
 	log.Printf("Cancelled context for console tail session: %s", cts.nodeID)
@@ -279,7 +279,7 @@ func (cts *consoleTailSession) cleanup() {
 		cts.conn.Close()
 	}
 
-	log.Printf("Cleanup completed for console tail session: %s", cts.nodeID)
+	log.Printf("Close completed for console tail session: %s", cts.nodeID)
 }
 
 func (s *interactiveConsoleSession) keepAlive() {
@@ -301,7 +301,7 @@ func (cts *consoleTailSession) waitForClientClose() {
 				log.Printf("WebSocket closed for tail session '%s', error: %v", cts.nodeID, err)
 			}
 
-			cts.cleanup()
+			cts.close()
 			break
 		}
 	}
@@ -422,7 +422,7 @@ func (cs ConsoleManager) doTailConsole(ctx context.Context, w http.ResponseWrite
 			"Error starting console tail session")
 	}
 
-	//defer session.cleanup() // Ensure cleanup always happens
+	//defer session.close() // Ensure cleanup always happens
 
 	// Monitor WebSocket for closure by reading (and discarding) any messages
 	// This is needed to detect when the client closes the connection
@@ -431,8 +431,8 @@ func (cs ConsoleManager) doTailConsole(ctx context.Context, w http.ResponseWrite
 	// 	for {
 	// 		_, _, err := session.conn.ReadMessage()
 	// 		if err != nil {
-	// 			log.Printf("WebSocket closed for tail session '%s', triggering cleanup", nodeID)
-	// 			session.cleanup()
+	// 			log.Printf("WebSocket closed for tail session '%s', triggering close", nodeID)
+	// 			session.close()
 	// 			return
 	// 		}
 	// 		// Discard any messages received (tail is one-way: server -> client)
@@ -534,7 +534,7 @@ func (cs ConsoleManager) doInteractConsole(ctx context.Context, w http.ResponseW
 		return newEndpointError(http.StatusInternalServerError,
 			"Error upgrading connection")
 	}
-	// conn.Close() is handled in session.cleanup()
+	// conn.Close() is handled in session.close()
 
 	session := newInteractiveConsoleSession(ctx, nodeID, conn)
 	if session == nil {
@@ -544,7 +544,7 @@ func (cs ConsoleManager) doInteractConsole(ctx context.Context, w http.ResponseW
 			"Error starting console session")
 	}
 
-	defer session.cleanup() // Ensure cleanup always happens
+	defer session.close() // Ensure cleanup always happens
 
 	log.Printf("Started conman process for console: %s", nodeID)
 
@@ -559,7 +559,7 @@ func (cs ConsoleManager) doInteractConsole(ctx context.Context, w http.ResponseW
 	// 	select {
 	// 	case <-ctx.Done():
 	// 		log.Printf("Context cancelled for console: %s", nodeID)
-	// 		session.cleanup()
+	// 		session.close()
 	// 	case <-session.done:
 	// 		// Session already cleaning up
 	// 	}
