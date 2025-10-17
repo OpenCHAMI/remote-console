@@ -75,7 +75,7 @@ type nodeConsoleInfo struct {
 
 // TODO: at some point we need to add a config file so that this
 // isn't static and new nodes are allowed to be added.
-func (node nodeConsoleInfo) isCertSSH() bool {
+func (node nodeConsoleInfo) isKeySSH() bool {
 	return node.Class == "Mountain" || node.Class == "Hill"
 }
 

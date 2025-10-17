@@ -27,11 +27,7 @@
 package console
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"io"
 	"log"
-	"os"
 	"time"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
@@ -40,22 +36,35 @@ import (
 // Time to wait between checking for credential changes
 var monitorIntervalSecs int = 30
 
-var previousPrivateKeyHash []byte = nil
-var previousPublicKeyHash []byte = nil
-
 var previousPasswords map[string]compcreds.CompCredentials = nil
 
 // function to do check for credential changes and restart conman if necessary
 func checkForChanges() {
 	restartConman := false
 
-	// check for changes in the mountain key files
-	if checkIfCertKeysChanged() {
+	var xnames []string = nil
+	sshKeyAuth := false
+
+	currNodesMutex.Lock()
+	{
+		defer currNodesMutex.Unlock()
+
+		for _, nci := range currentNodes {
+			if nci.isIPMI() || nci.isPassSSH() {
+				xnames = append(xnames, nci.BmcName)
+			} else if nci.isKeySSH() {
+				sshKeyAuth = true
+			}
+		}
+	}
+
+	// check for changes in the key files
+	if sshKeyAuth && checkIfKeysChanged() {
 		restartConman = true
 	}
 
-	// check for changes in river keys
-	if checkIfPasswordsChanged() {
+	// check for changes in the passwords
+	if len(xnames) > 0 && checkIfPasswordsChanged(xnames) {
 		// the config file will be updated in the runConman thread when conman is restarted
 		restartConman = true
 	}
@@ -81,20 +90,10 @@ func CredMonitor() {
 }
 
 // function to check if the passwords have changed since conman was configured
-func checkIfPasswordsChanged() bool {
+func checkIfPasswordsChanged(xnames []string) bool {
 	if previousPasswords == nil {
 		// this shouldn't happen due to the order of initialization, but just to be safe we skip this case.
 		return false
-	}
-
-	currNodesMutex.Lock()
-	defer currNodesMutex.Unlock()
-
-	var xnames []string = nil
-	for _, nci := range currentNodes {
-		if nci.isIPMI() || nci.isPassSSH() {
-			xnames = append(xnames, nci.BmcName)
-		}
 	}
 
 	// don't retry here so we don't block heartbeats with the mutex.  we can check again the next pass
@@ -116,63 +115,10 @@ func checkIfPasswordsChanged() bool {
 }
 
 // function to check if the console keys have changed since the last run of this function
-func checkIfCertKeysChanged() bool {
-	var keysChanged bool = false
-
+func checkIfKeysChanged() bool {
 	currNodesMutex.Lock()
 	defer currNodesMutex.Unlock()
 
-	// if no mountain nodes are monitored, the keys don't matter
-	for _, nci := range currentNodes {
-		if nci.isCertSSH() {
-			break
-		}
-		return false
-	}
-
-	// load hashes of both the public and private key files for comparison
-	currentPrivateKeyHash, err := hashFile(sshConsoleKey)
-	if err != nil {
-		log.Printf("Error generating a hash of the private console key: %s", err)
-		return false
-	}
-	currentPublicKeyHash, err := hashFile(sshConsoleKeyPub)
-	if err != nil {
-		log.Printf("Error generating a hash of the public console key: %s", err)
-		return false
-	}
-
-	// don't register a change if this is the first time and the fields are empty
-	if previousPrivateKeyHash != nil && previousPublicKeyHash != nil {
-		// if one key changes the other should change, but this checks both for safety
-		if !(bytes.Equal(currentPrivateKeyHash, previousPrivateKeyHash)) {
-			keysChanged = true
-		}
-		if !(bytes.Equal(currentPublicKeyHash, previousPublicKeyHash)) {
-			keysChanged = true
-		}
-	}
-
-	previousPrivateKeyHash = currentPrivateKeyHash
-	previousPublicKeyHash = currentPublicKeyHash
-
-	if keysChanged {
-		log.Printf("Change detected in the mountain keys.  Conman will be restarted.")
-	}
-	return keysChanged
-}
-
-// returns a hash of the given file
-func hashFile(fileName string) ([]byte, error) {
-	f, err := os.Open(fileName)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
-		return nil, err
-	}
-	return hasher.Sum(nil), nil
+	// Returns true is the key has changes
+	return ensureConsoleKeysPresent()
 }

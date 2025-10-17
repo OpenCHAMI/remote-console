@@ -42,9 +42,8 @@ COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin/
 COPY scripts/ssh-pwd-console /usr/bin/
-COPY scripts/ssh-pwd-mtn-console /usr/bin/
 COPY configs /app/configs
-RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console /usr/bin/ssh-pwd-mtn-console
+RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console
 
 RUN mkdir -p /var/log/conman/ /var/log/conman.old/ \
     && chown -Rv 65534:65534 /app /etc/conman.conf /var/log/conman/ /var/log/conman.old/

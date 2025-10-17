@@ -36,7 +36,6 @@ COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin
 COPY scripts/ssh-pwd-console /usr/bin
-COPY scripts/ssh-pwd-mtn-console /usr/bin/
 COPY configs /app/configs
 
 RUN chown -Rv 65534:65534 /app /etc/conman.conf
@@ -100,13 +99,12 @@ COPY scripts/conman.conf /app/conman_base.conf
 COPY scripts/conman.conf /etc/conman.conf
 COPY scripts/ssh-key-console /usr/bin/
 COPY scripts/ssh-pwd-console /usr/bin/
-COPY scripts/ssh-pwd-mtn-console /usr/bin/
 COPY configs /app/configs
 
 # Aliases
 RUN echo 'alias ll="ls -l"' >> /root/.bashrc
 RUN echo 'alias vi="vim"' >> /root/.bashrc
-RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console /usr/bin/ssh-pwd-mtn-console
+RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console
 
 # Create log directories and set ownership to nobody (UID/GID 65534)
 RUN mkdir -p /var/log/conman/ /var/log/conman.old/ \

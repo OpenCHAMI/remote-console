@@ -116,7 +116,7 @@ func signalConmanHUP() {
 			// NOTE - debugging test code, so don't worry about mutex for current nodes
 			log.Printf("Respinning current log test files...")
 			for _, nci := range currentNodes {
-				if nci.isCertSSH() || nci.isIPMI() {
+				if nci.isKeySSH() || nci.isIPMI() {
 					go createTestLogFile(nci.NodeName, true)
 				}
 			}
@@ -267,7 +267,7 @@ func updateConfigFile(forceUpdate bool) {
 	var ipmiXNames []string = make([]string, 0)
 	for _, nci := range currentNodes {
 		// This originally had logic to switch between key-based authentication and password-based
-		// authentication in v2.11.0, when remote-console was originally derived from the separate CSM 
+		// authentication in v2.11.0, when remote-console was originally derived from the separate CSM
 		// cray-console-node, cray-console-operator, and cray-console-data services. This requires SCSD
 		// (https://github.com/Cray-HPE/hms-scsd) to manage key distribution.
 		// OpenCHAMI doesn't have an SCSD equivalent as of v2.11.0, so this supports password auth
@@ -334,23 +334,14 @@ func updateConfigFile(forceUpdate bool) {
 				log.Panic(err)
 			}
 
-		} else if nci.isCertSSH() { //TODO rename cert ssh since we
-			//just use passwords for everything.  also need to fix
-			// this to have the node name etc
-			creds, ok := passwords[nci.BmcName]
-			if !ok {
-				log.Printf("No creds record returned for %s", nci.BmcName)
-			}
-			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-mtn-console %s %s REDACTED\"\n",
+		} else if nci.isKeySSH() {
+			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
 				nci.NodeName,
-				nci.NodeName,
-				creds.Username)
+				nci.NodeName)
 			// write the line to the config file
-			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-mtn-console %s %s %s\"\n",
+			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
 				nci.NodeName,
-				nci.NodeName,
-				creds.Username,
-				creds.Password)
+				nci.NodeName)
 
 			// write the output line if there is anything present
 			if _, err = cf.WriteString(output); err != nil {

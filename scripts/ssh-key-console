@@ -38,7 +38,7 @@ set env(TERM) xterm
 set controller [string range [lindex $argv 0] 0 end-2]
 set session [string range [lindex $argv 0] end-1 end]
 set timeout -1
-set pid [spawn ssh -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i /var/log/console/conman.key $session@$controller]
+set pid [spawn ssh -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i /app/conman.key $session@$controller]
 exit -onexit {
   exec kill $pid
   wait $pid
