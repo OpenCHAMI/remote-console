@@ -102,12 +102,10 @@ func SetupRoutes() {
 	RequestRouter.Get("/remote-console/readiness", doReadiness)
 	RequestRouter.Get("/remote-console/health", doHealth)
 
-	consoleManager := NewConsoleManager()
-
 	// WebSocket console access - tail mode
-	RequestRouter.Get("/remote-console/console/{nodeID}/tail", errorHandler(consoleManager.doTailConsole))
+	RequestRouter.Get("/remote-console/console/{nodeID}/tail", errorHandler(doTailConsole))
 	// WebSocket console access
-	RequestRouter.Get("/remote-console/console/{nodeID}", errorHandler(consoleManager.doInteractConsole))
+	RequestRouter.Get("/remote-console/console/{nodeID}", errorHandler(doInteractiveConsole))
 
 	// debug only routes
 	// router.Get("/remote-console/info", dbs.doInfo)

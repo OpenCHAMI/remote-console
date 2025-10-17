@@ -20,13 +20,6 @@ import (
 	"github.com/hpcloud/tail"
 )
 
-type ConsoleService interface {
-	doTailConsole(ctx context.Context, w http.ResponseWriter, r *http.Request) error
-	doInteractConsole(ctx context.Context, w http.ResponseWriter, r *http.Request) error
-}
-
-type ConsoleManager struct {
-}
 
 // interactiveConsoleSession manages the lifecycle of an interactive console session
 type interactiveConsoleSession struct {
@@ -214,7 +207,7 @@ func drainAndCloseRequestBody(req *http.Request) {
 	}
 }
 
-func (cs ConsoleManager) validateNode(id string) error {
+func validateNode(id string) error {
 	// make sure this is a valid node
 	if _, ok := nodeCache[id]; !ok {
 		log.Printf("%s is not a valid node.", id)
@@ -225,7 +218,7 @@ func (cs ConsoleManager) validateNode(id string) error {
 	return nil
 }
 
-func (cs ConsoleManager) extractNodeId(w http.ResponseWriter, r *http.Request) (string, error) {
+func extractNodeId(w http.ResponseWriter, r *http.Request) (string, error) {
 	nodeID := chi.URLParam(r, "nodeID")
 	if nodeID == "" {
 		log.Printf("There was an error reading the node ID from the request %s", r.URL.Path)
@@ -381,8 +374,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) error {
 	return nil
 }
 
-func (cs ConsoleManager) doTailConsole(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	log.Printf("doTailConsole called")
+func doTailConsole(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
@@ -394,13 +386,13 @@ func (cs ConsoleManager) doTailConsole(ctx context.Context, w http.ResponseWrite
 			fmt.Sprintf("(%s) Not Allowed", r.Method))
 	}
 
-	nodeID, err := cs.extractNodeId(w, r)
+	nodeID, err := extractNodeId(w, r)
 	if err != nil {
 		return err
 	}
 
 	// Make we are monitoring a valid node
-	err = cs.validateNode(nodeID)
+	err = validateNode(nodeID)
 	if err != nil {
 		return err
 	}
@@ -505,7 +497,7 @@ func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *webs
 	return session
 }
 
-func (cs ConsoleManager) doInteractConsole(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func  doInteractiveConsole(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
@@ -516,13 +508,13 @@ func (cs ConsoleManager) doInteractConsole(ctx context.Context, w http.ResponseW
 			fmt.Sprintf("(%s) Not Allowed", r.Method))
 	}
 
-	nodeID, err := cs.extractNodeId(w, r)
+	nodeID, err := extractNodeId(w, r)
 	if err != nil {
 		return err
 	}
 
 	// Make we are monitoring a valid node
-	err = cs.validateNode(nodeID)
+	err = validateNode(nodeID)
 	if err != nil {
 		return err
 	}
@@ -576,9 +568,4 @@ func (cs ConsoleManager) doInteractConsole(ctx context.Context, w http.ResponseW
 
 	log.Printf("Interactive console session ended for: %s", nodeID)
 	return nil
-}
-
-// NewConsoleManager factory function to create a new ConsoleService
-func NewConsoleManager() ConsoleService {
-	return &ConsoleManager{}
 }
