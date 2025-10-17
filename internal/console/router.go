@@ -25,27 +25,27 @@
 package console
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"net/http"
-	"encoding/json"
-	"context"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
 type endpointError struct {
-    statusCode int
-    message    string
+	statusCode int
+	message    string
 }
 
 func (e *endpointError) Error() string {
-    return e.message
+	return e.message
 }
 
 // Helper to create API errors
 func newEndpointError(status int, message string) *endpointError {
-    return &endpointError{statusCode: status, message: message}
+	return &endpointError{statusCode: status, message: message}
 }
 
 // Define a handler type that returns an error
@@ -66,25 +66,24 @@ func sendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 
 // Middleware that wraps your error-returning handlers
 func errorHandler(h handlerE) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		err := h(r.Context(), w, r)
-        if err != nil {
-            // Handle different error types
-            switch e := err.(type) {
-            case *endpointError:
-                SendResponseJSON(w, e.statusCode, map[string]string{
-                    "error": e.message,
-                })
-            default:
-                SendResponseJSON(w, http.StatusInternalServerError, map[string]string{
-                    "error": "Internal server error",
-                })
-                log.Printf("Internal error: %v", err)
-            }
-        }
-    }
+		if err != nil {
+			// Handle different error types
+			switch e := err.(type) {
+			case *endpointError:
+				SendResponseJSON(w, e.statusCode, map[string]string{
+					"error": e.message,
+				})
+			default:
+				SendResponseJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "Internal server error",
+				})
+				log.Printf("Internal error: %v", err)
+			}
+		}
+	}
 }
-
 
 var RequestRouter = chi.NewRouter()
 
@@ -116,7 +115,3 @@ func SetupRoutes() {
 	// router.Post("/remote-console/suspend", dbs.doSuspend)
 	// router.Post("/remote-console/resume", dbs.doResume)
 }
-
-
-
-
