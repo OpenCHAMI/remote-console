@@ -34,10 +34,6 @@ import (
 // Pause between each lookup for new node information
 var newNodeLookupSec int = 30
 
-// File to hold target number of node information - it will reside on
-// a shared file system so console-node pods can read what is set here
-const targetNodeFile string = "/var/log/console/TargetNodes.txt"
-
 func doGetNewNodes() {
 	// keep track of if we need to redo the configuration
 	changed := false
@@ -79,7 +75,9 @@ func doGetNewNodes() {
 		if len(names_map) != 0 {
 			changed = true
 			for name, _ := range names_map {
+				stopTailing(name)
 				delete(currentNodes, name)
+
 			}
 		}
 
@@ -113,22 +111,4 @@ func WatchForNodes() {
 		// Wait for the correct polling interval
 		time.Sleep(time.Duration(newNodeLookupSec) * time.Second)
 	}
-}
-
-// Function to release the node from being monitored
-func releaseNode(xname string) bool {
-	// NOTE: called during heartbeat thread
-
-	// This will remove it from the list of current nodes and stop tailing the
-	// log file.
-	found := false
-	if _, ok := currentNodes[xname]; ok {
-		delete(currentNodes, xname)
-		found = true
-	}
-
-	// remove the tail process for this file
-	stopTailing(xname)
-
-	return found
 }
