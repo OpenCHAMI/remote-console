@@ -30,6 +30,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"log"
 	"os"
 	"os/exec"
@@ -397,7 +398,7 @@ func rotateLogsOnce(fileStamp map[string]time.Time) {
 		// conman must be signaled to reconnect to moved log files
 		if conChanged {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
-			signalConmanHUP()
+			conman.SignalConmanHUP()
 		}
 
 		// the aggregation log must be restarted for moved file

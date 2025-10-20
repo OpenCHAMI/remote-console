@@ -53,6 +53,14 @@ var conAggLogFile string = ""
 var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
 
 // Set up tailing a log file to add to the aggregation file
+func AggregateFile(xname string) bool {
+	return aggregateFile(xname)
+}
+
+func LogPipeOutput(readPipe *io.ReadCloser, desc string) {
+	logPipeOutput(readPipe, desc)
+}
+
 func aggregateFile(xname string) bool {
 	// NOTE: in update config thread
 

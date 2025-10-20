@@ -38,6 +38,7 @@ import (
 
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
+	"github.com/OpenCHAMI/remote-console/internal/conman"
 )
 
 var (
@@ -49,6 +50,8 @@ var (
 
 	// Most recent update from the HSM
 	hardwareUpdateTime string = "Unknown"
+
+	DebugOnly bool = false
 )
 
 // Get environment var with default.
@@ -95,10 +98,18 @@ func main() {
 	//go console.WatchForNodes()
 
 	// start up the thread that runs conman
-	go console.RunConman()
+	go conman.RunConman(conman.ConmanDeps{
+		CurrNodesMutex: console.CurrNodesMutex,
+		CurrentNodes:   console.CurrentNodes,
+		DebugOnly:      console.DebugOnly,
+		AggregateFile:  console.AggregateFile, // you may need to export this
+		LogPipeOutput:  console.LogPipeOutput, // you may need to export this
+		GetPasswordsWithRetries: creds.GetPasswordsWithRetries,
+		SetPreviousPasswords:    creds.SetPreviousPasswords,
+	})
 
 	// start the thread that will make sure that the conman creds are correct
-	go creds.CredMonitor(console.CurrNodesMutex, console.CurrentNodes, console.SignalConmanTERM)
+	go creds.CredMonitor(console.CurrNodesMutex, console.CurrentNodes, conman.SignalConmanTERM)
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs

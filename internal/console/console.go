@@ -26,6 +26,7 @@ package console
 
 import (
 	"time"
+	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
@@ -92,7 +93,7 @@ func doGetNewNodes() {
 	if changed {
 		// term conman, which will trigger a regeneration of the
 		// config file before it restarts
-		SignalConmanTERM()
+		conman.SignalConmanTERM()
 
 		// rebuild the log rotation configuration file
 		updateLogRotateConf() //TODO: look at this to make sure
