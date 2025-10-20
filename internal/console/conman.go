@@ -35,6 +35,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/OpenCHAMI/remote-console/internal/creds"
 )
 
 // Global to access running conmand process
@@ -49,20 +51,20 @@ func configConman(forceConfigUpdate bool) bool {
 	// maintain a lock on the current nodes while doing complete configuration
 	// NOTE: this prevents the lists from being updated in the middle of doing
 	//  the configuration
-	currNodesMutex.Lock()
-	defer currNodesMutex.Unlock()
+	CurrNodesMutex.Lock()
+	defer CurrNodesMutex.Unlock()
 
 	// Set up or update the conman configuration file.
 	updateConfigFile(forceConfigUpdate)
 
 	// set up a thread to add log output to the aggregation file
-	for xname := range currentNodes {
+	for xname := range CurrentNodes {
 		// make sure the node is being aggregated - no-op if already being done
 		aggregateFile(xname)
 	}
 
 	// return if there are any nodes
-	return len(currentNodes) > 0
+	return len(CurrentNodes) > 0
 }
 
 // Loop that starts / restarts conmand process
@@ -115,8 +117,8 @@ func signalConmanHUP() {
 		if DebugOnly {
 			// NOTE - debugging test code, so don't worry about mutex for current nodes
 			log.Printf("Respinning current log test files...")
-			for _, nci := range currentNodes {
-				if nci.isKeySSH() || nci.isIPMI() {
+			for _, nci := range CurrentNodes {
+				if nci.IsKeySSH() || nci.IsIPMI() {
 					go createTestLogFile(nci.NodeName, true)
 				}
 			}
@@ -124,8 +126,8 @@ func signalConmanHUP() {
 	}
 }
 
-// Function to send SIGTERM to running conmand process
-func signalConmanTERM() {
+// SignalConmanTERM sends SIGTERM to running conmand process
+func SignalConmanTERM() {
 	// send interupt to tell conmand process to terminate
 	//  NOTE: this is called to force a complete re-initialization including
 	//   regenerating the configuration file
@@ -265,7 +267,7 @@ func updateConfigFile(forceUpdate bool) {
 
 	// collect the creds for the IPMI and PassSSH endpoints
 	var ipmiXNames []string = make([]string, 0)
-	for _, nci := range currentNodes {
+	for _, nci := range CurrentNodes {
 		// This originally had logic to switch between key-based authentication and password-based
 		// authentication in v2.11.0, when remote-console was originally derived from the separate CSM
 		// cray-console-node, cray-console-operator, and cray-console-data services. This requires SCSD
@@ -280,11 +282,11 @@ func updateConfigFile(forceUpdate bool) {
 	// gather passwords
 	// NOTE: sometimes if vault hasn't been populated yet there may be no
 	// return values - try again for a while in that case.
-	passwords := getPasswordsWithRetries(ipmiXNames, 15, 10)
-	previousPasswords = passwords
+	passwords := creds.GetPasswordsWithRetries(ipmiXNames, 15, 10)
+	creds.SetPreviousPasswords(passwords)
 
-	for _, nci := range currentNodes {
-		if nci.isIPMI() {
+	for _, nci := range CurrentNodes {
+		if nci.IsIPMI() {
 			ipmiXNames = append(ipmiXNames, nci.BmcName)
 			// connect using ipmi
 			creds, ok := passwords[nci.BmcName]
@@ -309,7 +311,7 @@ func updateConfigFile(forceUpdate bool) {
 				log.Panic(err)
 			}
 
-		} else if nci.isPassSSH() {
+		} else if nci.IsPassSSH() {
 			ipmiXNames = append(ipmiXNames, nci.BmcName)
 			// connect using password ssh
 			creds, ok := passwords[nci.BmcName]
@@ -334,7 +336,7 @@ func updateConfigFile(forceUpdate bool) {
 				log.Panic(err)
 			}
 
-		} else if nci.isKeySSH() {
+		} else if nci.IsKeySSH() {
 			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
 				nci.NodeName,
 				nci.NodeName)

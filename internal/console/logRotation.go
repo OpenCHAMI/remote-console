@@ -128,8 +128,8 @@ func doInitialConfFileUpdate() {
 	// the initial batch of consoles being monitored.
 
 	// put a lock on the current nodes while writing the file
-	currNodesMutex.Lock()
-	defer currNodesMutex.Unlock()
+	CurrNodesMutex.Lock()
+	defer CurrNodesMutex.Unlock()
 
 	// update the file now that it is safe to do so
 	updateLogRotateConf()
@@ -195,7 +195,7 @@ func updateLogRotateConf() {
 
 	// Add all nodes
 	consoleLogBackupDir := "/var/log/conman.old"
-	for _, cni := range currentNodes {
+	for _, cni := range CurrentNodes {
 		xname := cni.NodeName
 		fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
 		writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)

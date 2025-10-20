@@ -26,6 +26,7 @@ package console
 
 import (
 	"time"
+	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
 // maybe remove
@@ -42,12 +43,12 @@ func doGetNewNodes() {
 
 		fetched_nodes := getCurrentNodesFromHSM()
 
-		currNodesMutex.Lock()
-		defer currNodesMutex.Unlock()
+	CurrNodesMutex.Lock()
+	defer CurrNodesMutex.Unlock()
 
-		new_nodes := make(map[string]*nodeConsoleInfo)
-		names_map := make(map[string]bool)
-		for name, _ := range currentNodes {
+	new_nodes := make(map[string]*types.NodeConsoleInfo)
+	names_map := make(map[string]bool)
+		for name, _ := range CurrentNodes {
 			names_map[name] = true
 		}
 
@@ -55,7 +56,7 @@ func doGetNewNodes() {
 			//accumulate data for missing nodes to delete
 			delete(names_map, nci.NodeName)
 
-			curr_nci, present := currentNodes[nci.NodeName]
+			curr_nci, present := CurrentNodes[nci.NodeName]
 			if !present {
 				//
 				new_nodes[nci.NodeName] = &nci
@@ -65,7 +66,7 @@ func doGetNewNodes() {
 					// probably need to update.  we could refine this,
 					// but I imagine it almost never happens
 					changed = true
-					currentNodes[nci.NodeName] = &nci
+					CurrentNodes[nci.NodeName] = &nci
 				}
 			}
 		}
@@ -74,7 +75,7 @@ func doGetNewNodes() {
 			changed = true
 			for name, _ := range names_map {
 				stopTailing(name)
-				delete(currentNodes, name)
+				delete(CurrentNodes, name)
 
 			}
 		}
@@ -82,7 +83,7 @@ func doGetNewNodes() {
 		if len(new_nodes) != 0 {
 			changed = true
 			for name, nci := range new_nodes {
-				currentNodes[name] = nci
+				CurrentNodes[name] = nci
 			}
 		}
 	}
@@ -91,7 +92,7 @@ func doGetNewNodes() {
 	if changed {
 		// term conman, which will trigger a regeneration of the
 		// config file before it restarts
-		signalConmanTERM()
+		SignalConmanTERM()
 
 		// rebuild the log rotation configuration file
 		updateLogRotateConf() //TODO: look at this to make sure

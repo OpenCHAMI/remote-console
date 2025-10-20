@@ -27,10 +27,11 @@ package console
 import (
 	"log"
 	"time"
+	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
 // globals to cache current node information
-var nodeCache map[string]nodeConsoleInfo = make(map[string]nodeConsoleInfo)
+var nodeCache map[string]types.NodeConsoleInfo = make(map[string]types.NodeConsoleInfo)
 
 // Global var to control how often we check for hardware changes,
 // probably should be tunable
@@ -40,19 +41,19 @@ var hardwareUpdateTime string = "Unknown"
 // Global var to signal we are shutting down and prevent periodic checks from happening
 var inShutdown bool = false
 
-func updateCachedNodeData() (bool, []nodeConsoleInfo) {
+func updateCachedNodeData() (bool, []types.NodeConsoleInfo) {
 	// return if the console-data update succeeded
 	updateSuccessful := true
 
 	// get the current endpoints from hsm
 	currNodes := getCurrentNodesFromHSM()
-	currNodesMap := make(map[string]nodeConsoleInfo)
+	currNodesMap := make(map[string]types.NodeConsoleInfo)
 	for _, n := range currNodes {
 		currNodesMap[n.NodeName] = n
 	}
 
 	// Find new nodes that are in the currNodes but not in nodeCache
-	var newNodes []nodeConsoleInfo = nil
+	var newNodes []types.NodeConsoleInfo = nil
 	for _, n := range currNodes {
 		if _, found := nodeCache[n.NodeName]; !found {
 			newNodes = append(newNodes, n)
@@ -61,7 +62,7 @@ func updateCachedNodeData() (bool, []nodeConsoleInfo) {
 	}
 
 	// Find nodes to remove that are in the nodeCache but not in currNodes
-	var removedNodes []nodeConsoleInfo = nil
+	var removedNodes []types.NodeConsoleInfo = nil
 	for _, n := range nodeCache {
 		if _, found := currNodesMap[n.NodeName]; !found {
 			removedNodes = append(removedNodes, n)
@@ -93,7 +94,7 @@ func doHardwareUpdate() bool {
 
 // Main loop for console-operator stuff
 func WatchHardware() {
-	nodeCache["test-console"] = nodeConsoleInfo{
+	nodeCache["test-console"] = types.NodeConsoleInfo{
 		NodeName:    "test-console",
 		BmcName: "test-console-bmc",
 		BmcFqdn:  "localhost",

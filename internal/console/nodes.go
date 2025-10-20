@@ -29,6 +29,7 @@ package console
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/OpenCHAMI/remote-console/internal/types"
 	"log"
 	"strings"
 	"sync"
@@ -50,48 +51,16 @@ var (
 // connection methods, and we need to know how "class" is generated
 // both in CSM and OC-SMD
 
-var currNodesMutex = &sync.Mutex{}
+// CurrNodesMutex protects access to CurrentNodes
+var CurrNodesMutex = &sync.Mutex{}
 
 // this should just be a map of all of them, surely the swtiching cost
 // isn't very high?
-var currentNodes map[string]*nodeConsoleInfo = make(map[string]*nodeConsoleInfo) // [xname,*consoleInfo]
 
-// Struct to hold all node level information needed to form a console connection
-// NOTE: this is the basic unit of information required for each node
-// NOTE: expected values for 'Class' are:
-//
-//	Mountain - Cray hardware in full liquid cooled rack (ssh via key)
-//	Hill - Cray hardware in freestanding rack (ssh via key)
-//	River - Other brand hardware in freestanding rack (ipmi via user/password)
-//	Paradise - Cray xd224 - foxconn bmc (ssh via user/password)
-type nodeConsoleInfo struct {
-	NodeName string // node xname
-	BmcName  string // bmc xname
-	BmcFqdn  string // full name of bmc
-	Class    string // river/mtn class
-	NID      int    // NID of the node
-	Role     string // role of the node
-}
+// CurrentNodes is the map of all nodes being monitored
+var CurrentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo) // [xname,*consoleInfo]
 
-// TODO: at some point we need to add a config file so that this
-// isn't static and new nodes are allowed to be added.
-func (node nodeConsoleInfo) isKeySSH() bool {
-	return node.Class == "Mountain" || node.Class == "Hill"
-}
-
-func (node nodeConsoleInfo) isIPMI() bool {
-	return node.Class == "River"
-}
-
-func (node nodeConsoleInfo) isPassSSH() bool {
-	return node.Class == "Paradise"
-}
-
-// Provide a function to convert struct to string
-func (nc nodeConsoleInfo) String() string {
-	return fmt.Sprintf("NodeName:%s, BmcName:%s, BmcFqdn:%s, Class:%s, NID:%d, Role:%s",
-		nc.NodeName, nc.BmcName, nc.BmcFqdn, nc.Class, nc.NID, nc.Role)
-}
+// NodeConsoleInfo type moved to internal/types package
 
 // Struct to hold hsm redfish endpoint information
 type redfishEndpoint struct {
@@ -228,7 +197,7 @@ func getParadiseNodes() (map[string]struct{}, error) {
 	return nodes, nil
 }
 
-func getCurrentNodesFromHSM() (nodes []nodeConsoleInfo) {
+func getCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
 	// Get the BMC IP addresses and user, and password for individual nodes.
 	// conman is only set up for River nodes.
 	log.Printf("Starting to get current nodes on the system")
@@ -265,7 +234,7 @@ func getCurrentNodesFromHSM() (nodes []nodeConsoleInfo) {
 	for _, sc := range stComps {
 		if sc.Type == "Node" {
 			// create a new entry for this node - take initial vals from state component info
-			newNode := nodeConsoleInfo{NodeName: sc.ID, Class: sc.Class, NID: sc.NID, Role: sc.Role}
+			newNode := types.NodeConsoleInfo{NodeName: sc.ID, Class: sc.Class, NID: sc.NID, Role: sc.Role}
 
 			// If this is a paradise node, switch the class name
 			if _, isParadise := paradiseNodes[sc.ID]; isParadise {
