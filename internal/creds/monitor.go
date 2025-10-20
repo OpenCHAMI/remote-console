@@ -9,30 +9,27 @@ import (
 	"log"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
+
+type SignalConmanTERM func ()
 
 // Time to wait between checking for credential changes
 var MonitorIntervalSecs int = 30
 
 // function to do check for credential changes and restart conman if necessary
-func checkForChanges() {
+func checkForChanges(sigTERMConman SignalConmanTERM) {
 	restartConman := false
 
 	var xnames []string = nil
 	sshKeyAuth := false
 
-	nodes.CurrNodesMutex.Lock()
-	{
-		defer nodes.CurrNodesMutex.Unlock()
-
-		for _, nci := range nodes.CurrentNodes {
-			if nci.IsIPMI() || nci.IsPassSSH() {
-				xnames = append(xnames, nci.BmcName)
-			} else if nci.IsKeySSH() {
-				sshKeyAuth = true
-			}
+	currentNodes := nodes.CurrentNodes()
+	for _, nci := range currentNodes {
+		if nci.IsIPMI() || nci.IsPassSSH() {
+			xnames = append(xnames, nci.BmcName)
+		} else if nci.IsKeySSH() {
+			sshKeyAuth = true
 		}
 	}
 
@@ -45,15 +42,15 @@ func checkForChanges() {
 	}
 
 	if restartConman {
-		conman.SignalConmanTERM()
+		sigTERMConman()
 	}
 }
 
 // function to continuously monitor for changes that require conman to restart
-func CredMonitor() {
+func CredMonitor(conman SignalConmanTERM) {
 	time.Sleep(time.Duration(MonitorIntervalSecs) * time.Second)
 	for {
-		checkForChanges()
+		checkForChanges(conman)
 		time.Sleep(time.Duration(MonitorIntervalSecs) * time.Second)
 	}
 }
@@ -80,7 +77,5 @@ func checkIfPasswordsChanged(xnames []string) bool {
 }
 
 func checkIfKeysChanged() bool {
-	nodes.CurrNodesMutex.Lock()
-	defer nodes.CurrNodesMutex.Unlock()
 	return EnsureConsoleKeysPresent()
 }

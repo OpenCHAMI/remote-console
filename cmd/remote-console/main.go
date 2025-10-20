@@ -77,7 +77,7 @@ func main() {
 	log.Printf("Remote console service starting")
 	// Set up the zombie killer
 	log.Printf("Starting zombie killer...")
-	//go conman.WatchForZombies()
+	go conman.WatchForZombies()
 
 	// first we set up the goroutine that polls the hsm
 	go nodes.WatchHardware()
@@ -93,43 +93,21 @@ func main() {
 	// have one container
 	// respinAggLog()
 
-	// Initialize and start log rotation
-	// Convert CurrentNodes to use the NodeInfo interface
-	adaptedNodes := make(map[string]logs.NodeInfo)
-	for k, v := range nodes.CurrentNodes {
-		adaptedNodes[k] = &nodes.NodeInfoAdapter{NodeConsoleInfo: v}
-	}
-
-	   logDeps := logs.RotationDeps{
-		   CurrNodesMutex:   nodes.CurrNodesMutex,
-		   CurrentNodes:     adaptedNodes,
-		   SignalConmanHUP:  conman.SignalConmanHUP,
-		   EnsureDirPresent: utils.EnsureDirPresent,
-	   }
-	logs.LogRotate(logDeps)
+	// Start log rotation with callback to signal conman
+	logs.LogRotate(conman.SignalConmanHUP)
 
 	// spin a thread that watches for changes in console configuration
 	log.Printf("Starting hardware watch loop...")
-	//go nodes.WatchForNodes(nodes.WatcherDeps{
-	//	SignalConmanTERM:    conman.SignalConmanTERM,
-	//	UpdateLogRotateConf: logs.UpdateLogRotateConf,
-	//	StopTailing:         logs.StopTailing,
-	//	NewNodeLookupSec:    30,
-	//})
+	go nodes.WatchForNodes(conman.SignalConmanTERM, logs.UpdateLogRotateConf)
 
 	// start up the thread that runs conman
-	go conman.RunConman(conman.ConmanDeps{
-		CurrNodesMutex:          nodes.CurrNodesMutex,
-		CurrentNodes:            nodes.CurrentNodes,
-		DebugOnly:               nodes.DebugOnly,
-		AggregateFile:           logs.AggregateFile,
-		LogPipeOutput:           logs.LogPipeOutput,
-		GetPasswordsWithRetries: creds.GetPasswordsWithRetries,
-		SetPreviousPasswords:    creds.SetPreviousPasswords,
-	})
+	go conman.RunConman()
+
+	// start log aggregation
+	go logs.AggregateFiles(nodes.CurrentNodes)
 
 	// start the thread that will make sure that the conman creds are correct
-	conman.SignalConmanTERM()
+	go creds.CredMonitor(conman.SignalConmanTERM)
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs

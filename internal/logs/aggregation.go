@@ -26,10 +26,9 @@
 package logs
 
 import (
-	"bufio"
+
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -37,6 +36,8 @@ import (
 	"time"
 
 	"github.com/hpcloud/tail"
+
+	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
 // Global vars
@@ -72,21 +73,6 @@ func StopTailing(xname string) {
 	if cancel, ok := tailThreads[xname]; ok {
 		(*cancel)()
 		delete(tailThreads, xname)
-	}
-}
-
-// LogPipeOutput takes the output of a pipe and logs it
-func LogPipeOutput(readPipe *io.ReadCloser, desc string) {
-	log.Printf("Starting log of conmand %s output", desc)
-	er := bufio.NewReader(*readPipe)
-	for {
-		// read the next line
-		line, err := er.ReadString('\n')
-		if err != nil {
-			log.Printf("Ending %s logging from error:%s", desc, err)
-			break
-		}
-		log.Print(line)
 	}
 }
 
@@ -169,4 +155,17 @@ func RespinAggLog() {
 
 	conAggLogger = log.New(calf, "", 0)
 	conAggLogger.Print("Starting aggregation log")
+}
+
+func AggregateFiles(currentNodesFunc func() map[string]*types.NodeConsoleInfo) {
+	nodes := currentNodesFunc()
+	for {
+
+		for xname := range nodes {
+			// make sure the node is being aggregated - no-op if already being done
+			AggregateFile(xname)
+		}
+
+		time.Sleep(10 * time.Second)
+	}
 }

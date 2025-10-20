@@ -12,29 +12,28 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
+	"bufio"
+	"sync"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/creds"
 )
 
+var conmanMutex = &sync.Mutex{}
 var command *exec.Cmd = nil
 
 const baseConfFile string = "/home/cjh/work/source/remote-console/conman_base.conf"
 const confFile string = "./conman.conf"
 
 // ConmanDeps defines the dependencies required by the conman package.
+// We keep function dependencies here to avoid import cycles.
 type ConmanDeps struct {
-	CurrNodesMutex *sync.Mutex
-	CurrentNodes   map[string]*types.NodeConsoleInfo
-	DebugOnly      bool
-	AggregateFile  func(xname string) bool
-	LogPipeOutput  func(readPipe *io.ReadCloser, desc string)
 	GetPasswordsWithRetries func(xnames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials
 	SetPreviousPasswords    func(map[string]compcreds.CompCredentials)
-	CreateTestLogFile      func(xname string, respin bool) // for debug respin
+	CreateTestLogFile       func(xname string, respin bool) // for debug respin
 }
 
 var globalDeps *ConmanDeps
@@ -44,39 +43,33 @@ func SetConmanDeps(deps *ConmanDeps) {
 }
 
 // RunConman starts the conman management loop with injected dependencies.
-func RunConman(deps ConmanDeps) {
+func RunConman() {
 	forceConfigUpdate := true
 	for {
-		hasNodes := configConman(deps, forceConfigUpdate)
+		hasNodes := configConman(forceConfigUpdate)
 		forceConfigUpdate = false
 
-		if deps.DebugOnly {
+		if nodes.DebugOnly {
 			time.Sleep(25 * time.Second)
 			log.Printf("Sleeping the executeConman process")
 		} else if !hasNodes {
 			log.Printf("No console nodes found - trying again")
 			time.Sleep(30 * time.Second)
 		} else {
-			executeConman(deps)
+			executeConman()
 		}
 		time.Sleep(10 * time.Second)
 	}
 }
 
-func configConman(deps ConmanDeps, forceConfigUpdate bool) bool {
-	deps.CurrNodesMutex.Lock()
-	defer deps.CurrNodesMutex.Unlock()
+func configConman(forceConfigUpdate bool) bool {
+	conmanMutex.Lock()
+	defer conmanMutex.Unlock()
 
-	updateConfigFile(deps, forceConfigUpdate)
-
-	for xname := range deps.CurrentNodes {
-		deps.AggregateFile(xname)
-	}
-
-	return len(deps.CurrentNodes) > 0
+	return updateConfigFile(forceConfigUpdate)
 }
 
-func updateConfigFile(deps ConmanDeps, forceUpdate bool) {
+func updateConfigFile(forceUpdate bool) bool{
 	log.Print("Updating the configuration file")
 	log.Printf("Opening base configuration file: %s", baseConfFile)
 	bf, err := os.Open(baseConfFile)
@@ -87,7 +80,7 @@ func updateConfigFile(deps ConmanDeps, forceUpdate bool) {
 
 	if !forceUpdate && !willUpdateConfig(bf) {
 		log.Print("Skipping update due to base config file flag")
-		return
+		return false
 	}
 
 	log.Printf("Opening conman configuration file for output: %s", confFile)
@@ -102,15 +95,17 @@ func updateConfigFile(deps ConmanDeps, forceUpdate bool) {
 		log.Printf("Unable to copy base file into config: %s", err)
 	}
 
+	currentNodes := nodes.CurrentNodes()
 	var ipmiXNames []string
-	for _, nci := range deps.CurrentNodes {
+	for _, nci := range currentNodes {
 		ipmiXNames = append(ipmiXNames, nci.BmcName)
 	}
 
-	passwords := deps.GetPasswordsWithRetries(ipmiXNames, 15, 10)
-	deps.SetPreviousPasswords(passwords)
+	// TODO this should be enscapsulated in creds
+	passwords := creds.GetPasswordsWithRetries(ipmiXNames, 15, 10)
+	creds.SetPreviousPasswords(passwords)
 
-	for _, nci := range deps.CurrentNodes {
+	for _, nci := range currentNodes {
 		if nci.IsIPMI() {
 			ipmiXNames = append(ipmiXNames, nci.BmcName)
 			creds, ok := passwords[nci.BmcName]
@@ -147,6 +142,8 @@ func updateConfigFile(deps ConmanDeps, forceUpdate bool) {
 			}
 		}
 	}
+
+	return len(currentNodes) > 0
 }
 
 func willUpdateConfig(fp *os.File) bool {
@@ -189,9 +186,9 @@ func SignalConmanHUP() {
 		command.Process.Signal(syscall.SIGHUP)
 	} else {
 		log.Print("Warning: Attempting to signal conman process when nil.")
-		if globalDeps != nil && globalDeps.DebugOnly && globalDeps.CurrentNodes != nil && globalDeps.CreateTestLogFile != nil {
+		if globalDeps != nil && nodes.DebugOnly && nodes.CurrentNodes != nil && globalDeps.CreateTestLogFile != nil {
 			log.Printf("Respinning current log test files...")
-			for _, nci := range globalDeps.CurrentNodes {
+			for _, nci := range nodes.CurrentNodes() {
 				if nci.IsKeySSH() || nci.IsIPMI() {
 					go globalDeps.CreateTestLogFile(nci.NodeName, true)
 				}
@@ -200,7 +197,23 @@ func SignalConmanHUP() {
 	}
 }
 
-func executeConman(deps ConmanDeps) {
+// LogPipeOutput takes the output of a pipe and logs it
+func logPipeOutput(readPipe *io.ReadCloser, desc string) {
+	log.Printf("Starting log of conmand %s output", desc)
+	er := bufio.NewReader(*readPipe)
+	for {
+		// read the next line
+		line, err := er.ReadString('\n')
+		if err != nil {
+			log.Printf("Ending %s logging from error:%s", desc, err)
+			break
+		}
+		log.Print(line)
+	}
+}
+
+
+func executeConman() {
 	log.Print("Starting a new instance of conmand")
 	if command != nil {
 		log.Print("ERROR: command not nil on entry to executeConman!!")
@@ -214,8 +227,8 @@ func executeConman(deps ConmanDeps) {
 	if err != nil {
 		log.Panicf("Unable to connect to conmand stdout pipe: %s", err)
 	}
-	go deps.LogPipeOutput(&cmdStdErr, "stderr")
-	go deps.LogPipeOutput(&cmdStdOut, "stdout")
+	go logPipeOutput(&cmdStdErr, "stderr")
+	go logPipeOutput(&cmdStdOut, "stdout")
 	log.Print("Starting conmand process")
 	if err = command.Start(); err != nil {
 		log.Panicf("Unable to start the command: %s", err)

@@ -32,6 +32,7 @@ import (
 		"log"
 		"strings"
 		"sync"
+		"time"
 
 		"github.com/OpenCHAMI/remote-console/internal/types"
 		"github.com/OpenCHAMI/remote-console/internal/utils"
@@ -45,11 +46,14 @@ var (
 	DebugOnly = false
 )
 
+// Pause between each lookup for new node information
+var newNodeLookupSec int = 30
+
 // CurrNodesMutex protects access to CurrentNodes
-var CurrNodesMutex = &sync.Mutex{}
+var currNodesMutex = &sync.Mutex{}
 
 // CurrentNodes is the map of all nodes being monitored
-var CurrentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo)
+var currentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo)
 
 // NodeInfoAdapter adapts types.NodeConsoleInfo to logs.NodeInfo interface
 type NodeInfoAdapter struct {
@@ -259,4 +263,120 @@ func GetCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
 	}
 
 	return nodes
+}
+
+func doGetNewNodes(signalConmanTERM, updateLogRotateConf func()) {
+	// keep track of if we need to redo the configuration
+	changed := false
+
+	// Check if we need to gather more nodes - don't take more
+	//  if the service is shutting down
+	if !inShutdown {
+
+		fetched_nodes := GetCurrentNodesFromHSM()
+
+		currNodesMutex.Lock()
+		defer currNodesMutex.Unlock()
+
+		new_nodes := make(map[string]*types.NodeConsoleInfo)
+		names_map := make(map[string]bool)
+		for name, _ := range currentNodes {
+			names_map[name] = true
+		}
+
+		for _, nci := range fetched_nodes {
+			//accumulate data for missing nodes to delete
+			delete(names_map, nci.NodeName)
+
+			curr_nci, present := currentNodes[nci.NodeName]
+			if !present {
+				//
+				new_nodes[nci.NodeName] = &nci
+			} else {
+				if *curr_nci != nci {
+					// something about the info has changed so we
+					// probably need to update.  we could refine this,
+					// but I imagine it almost never happens
+					changed = true
+					currentNodes[nci.NodeName] = &nci
+				}
+			}
+		}
+
+		if len(names_map) != 0 {
+			changed = true
+			for name, _ := range names_map {
+				delete(currentNodes, name)
+			}
+		}
+
+		if len(new_nodes) != 0 {
+			changed = true
+			for name, nci := range new_nodes {
+				currentNodes[name] = nci
+			}
+		}
+	}
+
+	// Restart the conman process if needed
+	if changed {
+		// term conman, which will trigger a regeneration of the
+		// config file before it restarts
+		if signalConmanTERM != nil {
+			signalConmanTERM()
+		}
+
+		// rebuild the log rotation configuration file
+		if updateLogRotateConf != nil {
+			updateLogRotateConf()
+		}
+	}
+
+}
+
+// Primary loop to watch for updates
+func WatchForNodes(signalConmanTERM, updateLogRotateConf func()) {
+	// create a loop to execute the conmand command
+	for {
+		// look for new nodes once
+		doGetNewNodes(signalConmanTERM, updateLogRotateConf)
+
+		// Wait for the correct polling interval
+		time.Sleep(time.Duration(newNodeLookupSec) * time.Second)
+	}
+}
+
+func CurrentNodes() map[string]*types.NodeConsoleInfo {
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+
+	// create a copy of the current nodes to return
+	nodesCopy := make(map[string]*types.NodeConsoleInfo)
+	for k, v := range currentNodes {
+		nodesCopy[k] = v
+	}
+
+	return nodesCopy
+}
+
+// Function to release the node from being monitored
+func releaseNode(xname string, stopTailing func(string)) bool {
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+	// NOTE: called during heartbeat thread
+
+	// This will remove it from the list of current nodes and stop tailing the
+	// log file.
+	found := false
+	if _, ok := currentNodes[xname]; ok {
+		delete(currentNodes, xname)
+		found = true
+	}
+
+	// remove the tail process for this file
+	if stopTailing != nil {
+		stopTailing(xname)
+	}
+
+	return found
 }

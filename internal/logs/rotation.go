@@ -35,17 +35,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+	"sync"
+
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
-// RotationDeps defines dependencies needed for log rotation
-type RotationDeps struct {
-	CurrNodesMutex  *sync.Mutex
-	CurrentNodes    map[string]NodeInfo
-	SignalConmanHUP func()
-		EnsureDirPresent func(dir string, perm os.FileMode) (bool, error)
-}
+var logMutex = &sync.Mutex{}
 
 // NodeInfo interface to avoid import cycles
 type NodeInfo interface {
@@ -71,19 +68,11 @@ var logRotConNumRotate int = 2       // number of console log backup copies to k
 var logRotAggFileSize string = "20M" // size of the aggregation file to rotate
 var logRotAggNumRotate int = 1       // number of aggregation backup copies to keep
 
-var rotDeps *RotationDeps
-
-// SetRotationDeps sets the dependencies for log rotation
-func SetRotationDeps(deps *RotationDeps) {
-	rotDeps = deps
-}
-
 // LogRotate initializes and starts log rotation
-func LogRotate(deps RotationDeps) {
-	rotDeps = &deps
+func LogRotate(signalConmanHUP func()) {
 	
 	// Set up the 'backups' directory for logrotation to use
-		deps.EnsureDirPresent(logRotDir, 0755)
+	utils.EnsureDirPresent(logRotDir, 0755)
 
 	// Check for log rotation env vars
 	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
@@ -119,19 +108,10 @@ func LogRotate(deps RotationDeps) {
 	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logRotAggFileSize, logRotAggNumRotate)
 
 	// Create the log rotation configuration file
-	doInitialConfFileUpdate()
+	UpdateLogRotateConf()
 
 	// Start the log rotation thread
-	go doLogRotate()
-}
-
-// UpdateLogRotateConf updates the log rotation configuration file
-func UpdateLogRotateConf() {
-	if rotDeps != nil {
-		rotDeps.CurrNodesMutex.Lock()
-		defer rotDeps.CurrNodesMutex.Unlock()
-		updateLogRotateConf()
-	}
+	go doLogRotate(signalConmanHUP)
 }
 
 func isTrue(str string) bool {
@@ -145,16 +125,11 @@ func isTrue(str string) bool {
 	return false
 }
 
-func doInitialConfFileUpdate() {
-	if rotDeps == nil {
-		return
-	}
-	rotDeps.CurrNodesMutex.Lock()
-	defer rotDeps.CurrNodesMutex.Unlock()
-	updateLogRotateConf()
-}
+// UpdateLogRotateConf updates the log rotation configuration file
+func UpdateLogRotateConf() {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 
-func updateLogRotateConf() {
 	log.Printf("LOG ROTATE: Opening conman log rotation configuration file for output: %s", logRotConfFile)
 	lrf, err := os.Create(logRotConfFile)
 	if err != nil {
@@ -176,13 +151,11 @@ func updateLogRotateConf() {
 	}
 
 	// Add all nodes
-	if rotDeps != nil {
-		consoleLogBackupDir := "/var/log/conman.old"
-		for _, cni := range rotDeps.CurrentNodes {
-			xname := cni.GetNodeName()
-			fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
-			writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
-		}
+	consoleLogBackupDir := "/var/log/conman.old"
+	for _, cni := range nodes.CurrentNodes() {
+		xname := cni.NodeName
+		fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
+		writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
 	}
 
 	fmt.Fprintln(lrf, "")
@@ -290,7 +263,7 @@ func readLogRotTimestamps(fileStamp map[string]time.Time) (conChanged, aggChange
 	return conChanged, aggChanged
 }
 
-func doLogRotate() {
+func doLogRotate(signalConmanHUP func()) {
 	time.Sleep(120 * time.Second)
 
 	sleepSecs := time.Duration(300) * time.Second
@@ -305,13 +278,13 @@ func doLogRotate() {
 
 	for {
 		if logRotEnabled {
-			rotateLogsOnce(fileStamp)
+			rotateLogsOnce(fileStamp, signalConmanHUP)
 		}
 		time.Sleep(sleepSecs)
 	}
 }
 
-func rotateLogsOnce(fileStamp map[string]time.Time) {
+func rotateLogsOnce(fileStamp map[string]time.Time, signalConmanHUP func()) {
 	log.Print("LOG ROTATE: Starting logrotate")
 	cmd := exec.Command("logrotate", "-s", logRotStateFile, logRotConfFile)
 	exitCode := -1
@@ -331,8 +304,10 @@ func rotateLogsOnce(fileStamp map[string]time.Time) {
 
 		if conChanged {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
-			if rotDeps != nil && rotDeps.SignalConmanHUP != nil {
-				rotDeps.SignalConmanHUP()
+			if signalConmanHUP != nil {
+				signalConmanHUP()
+			} else {
+				log.Print("Warning: signalConmanHUP not provided, cannot signal conman")
 			}
 		}
 
