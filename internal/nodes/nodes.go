@@ -1,4 +1,5 @@
-//
+//package nodes
+
 //  MIT License
 //
 //  (C) Copyright 2019-2024 Hewlett Packard Enterprise Development LP
@@ -22,43 +23,32 @@
 //  OTHER DEALINGS IN THE SOFTWARE.
 //
 
-// This file contains the code needed to find node information
-
-package console
+// Package nodes manages node discovery and state from HSM
+package nodes
 
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/OpenCHAMI/remote-console/internal/types"
 	"log"
 	"strings"
 	"sync"
+
+	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
 var (
-	HsmURL    = "http://cray-smd/"
+	// HsmURL is the base URL for HSM/SMD API
+	HsmURL = "http://cray-smd/"
+	
+	// DebugOnly mode prevents actual operations
 	DebugOnly = false
 )
-
-// Globals for managing nodes being watched
-//  Note that there are three classes of nodes:
-//
-//	IPMI Nodes: connect through ipmi protocol directly through conman
-//	CertSSH Nodes: connect through expect script via passwordless ssh
-//	PassSSH Nodes: connect through expect script via password based ssh
-
-// we need a more general and configurable system for mapping classes
-// connection methods, and we need to know how "class" is generated
-// both in CSM and OC-SMD
 
 // CurrNodesMutex protects access to CurrentNodes
 var CurrNodesMutex = &sync.Mutex{}
 
-// this should just be a map of all of them, surely the swtiching cost
-// isn't very high?
-
 // CurrentNodes is the map of all nodes being monitored
-var CurrentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo) // [xname,*consoleInfo]
+var CurrentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo)
 
 // NodeInfoAdapter adapts types.NodeConsoleInfo to logs.NodeInfo interface
 type NodeInfoAdapter struct {
@@ -69,9 +59,7 @@ func (n *NodeInfoAdapter) GetNodeName() string {
 	return n.NodeName
 }
 
-// NodeConsoleInfo type moved to internal/types package
-
-// Struct to hold hsm redfish endpoint information
+// redfishEndpoint holds HSM redfish endpoint information
 type redfishEndpoint struct {
 	ID       string
 	Type     string
@@ -80,12 +68,12 @@ type redfishEndpoint struct {
 	Password string
 }
 
-// Provide a function to convert struct to string
+// String returns a string representation with password redacted
 func (re redfishEndpoint) String() string {
 	return fmt.Sprintf("ID:%s, Type:%s, FQDN:%s, User:%s, Password:REDACTED", re.ID, re.Type, re.FQDN, re.User)
 }
 
-// Struct to hold hsm state component information
+// stateComponent holds HSM state component information
 type stateComponent struct {
 	ID    string
 	Type  string
@@ -94,12 +82,12 @@ type stateComponent struct {
 	Role  string `json:",omitempty"`
 }
 
-// Provide a function to convert struct to string
+// String returns a string representation
 func (sc stateComponent) String() string {
 	return fmt.Sprintf("ID:%s, Type:%s, Class:%s, NID:%d, Role:%s", sc.ID, sc.Type, sc.Class, sc.NID, sc.Role)
 }
 
-// Query hsm for redfish endpoint information
+// getRedfishEndpoints queries HSM for redfish endpoint information
 func getRedfishEndpoints() ([]redfishEndpoint, error) {
 	type response struct {
 		RedfishEndpoints []redfishEndpoint
@@ -124,7 +112,7 @@ func getRedfishEndpoints() ([]redfishEndpoint, error) {
 	return rp.RedfishEndpoints, nil
 }
 
-// Query hsm for state component information
+// getStateComponents queries HSM for state component information
 func getStateComponents() ([]stateComponent, error) {
 	// get the component states from hsm - includes river/mountain information
 	type response struct {
@@ -151,7 +139,7 @@ func getStateComponents() ([]stateComponent, error) {
 	return rp.Components, nil
 }
 
-// Query hsm for Paradise (xd224) nodes
+// getParadiseNodes queries HSM for Paradise (xd224) nodes
 func getParadiseNodes() (map[string]struct{}, error) {
 	// Paradise nodes are identified by having the manufacturer as 'Foxconn' and
 	// the model as either 'HPE Cray Supercomputing XD224' or '1A62WCB00-600-G'.
@@ -206,7 +194,8 @@ func getParadiseNodes() (map[string]struct{}, error) {
 	return nodes, nil
 }
 
-func getCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
+// GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
+func GetCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
 	// Get the BMC IP addresses and user, and password for individual nodes.
 	// conman is only set up for River nodes.
 	log.Printf("Starting to get current nodes on the system")

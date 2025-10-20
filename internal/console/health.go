@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 type HealthService interface {
@@ -73,9 +74,9 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 // Fill out the current status of a HealthResponse object
 func getCurrentHealth() HealthResponse {
 	var stats HealthResponse
-	stats.HardwareUpdateSec = fmt.Sprintf("%d", newHardwareCheckPeriodSec)
-	stats.LastHardwareUpdate = hardwareUpdateTime
-	stats.NumberConsoles = fmt.Sprintf("%d", len(nodeCache))
+	stats.HardwareUpdateSec = fmt.Sprintf("%d", nodes.GetHardwareUpdatePeriodSec())
+	stats.LastHardwareUpdate = nodes.GetHardwareUpdateTime()
+	stats.NumberConsoles = fmt.Sprintf("%d", nodes.GetNodeCacheLen())
 	return stats
 }
 

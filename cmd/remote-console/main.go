@@ -40,6 +40,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 var (
@@ -68,8 +69,8 @@ func main() {
 	debugLog.Init()
 
 	// allow for changes in the SMD URL
-	console.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
-	console.DebugOnly = getEnv("DEBUG", "false") == "true"
+	nodes.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
+	nodes.DebugOnly = getEnv("DEBUG", "false") == "true"
 	svcHost = getEnv("SVC_HOST", "0.0.0.0:8080")
 
 	log.Printf("Remote console service starting")
@@ -78,7 +79,7 @@ func main() {
 	//go conman.WatchForZombies()
 
 	// first we set up the goroutine that polls the hsm
-	go console.WatchHardware()
+	go nodes.WatchHardware()
 
 	// then we set up the goroutine that controls conman
 	_, err := console.EnsureDirPresent("/var/log/conman", 0755)
@@ -94,35 +95,40 @@ func main() {
 	// Initialize and start log rotation
 	// Convert CurrentNodes to use the NodeInfo interface
 	adaptedNodes := make(map[string]logs.NodeInfo)
-	for k, v := range console.CurrentNodes {
-		adaptedNodes[k] = &console.NodeInfoAdapter{NodeConsoleInfo: v}
+	for k, v := range nodes.CurrentNodes {
+		adaptedNodes[k] = &nodes.NodeInfoAdapter{NodeConsoleInfo: v}
 	}
-	
+
 	logDeps := logs.RotationDeps{
-		CurrNodesMutex:  console.CurrNodesMutex,
-		CurrentNodes:    adaptedNodes,
-		SignalConmanHUP: conman.SignalConmanHUP,
+		CurrNodesMutex:   nodes.CurrNodesMutex,
+		CurrentNodes:     adaptedNodes,
+		SignalConmanHUP:  conman.SignalConmanHUP,
 		EnsureDirPresent: console.EnsureDirPresent,
 	}
 	logs.LogRotate(logDeps)
 
 	// spin a thread that watches for changes in console configuration
 	log.Printf("Starting hardware watch loop...")
-	//go console.WatchForNodes()
+	//go nodes.WatchForNodes(nodes.WatcherDeps{
+	//	SignalConmanTERM:    conman.SignalConmanTERM,
+	//	UpdateLogRotateConf: logs.UpdateLogRotateConf,
+	//	StopTailing:         logs.StopTailing,
+	//	NewNodeLookupSec:    30,
+	//})
 
 	// start up the thread that runs conman
 	go conman.RunConman(conman.ConmanDeps{
-		CurrNodesMutex: console.CurrNodesMutex,
-		CurrentNodes:   console.CurrentNodes,
-		DebugOnly:      console.DebugOnly,
-		AggregateFile:  logs.AggregateFile,
-		LogPipeOutput:  logs.LogPipeOutput,
+		CurrNodesMutex:          nodes.CurrNodesMutex,
+		CurrentNodes:            nodes.CurrentNodes,
+		DebugOnly:               nodes.DebugOnly,
+		AggregateFile:           logs.AggregateFile,
+		LogPipeOutput:           logs.LogPipeOutput,
 		GetPasswordsWithRetries: creds.GetPasswordsWithRetries,
 		SetPreviousPasswords:    creds.SetPreviousPasswords,
 	})
 
 	// start the thread that will make sure that the conman creds are correct
-	go creds.CredMonitor(console.CurrNodesMutex, console.CurrentNodes, conman.SignalConmanTERM)
+	go creds.CredMonitor(nodes.CurrNodesMutex, nodes.CurrentNodes, conman.SignalConmanTERM)
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs

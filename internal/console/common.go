@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
@@ -47,11 +49,10 @@ func drainAndCloseRequestBody(req *http.Request) {
 
 func validateNode(id string) bool {
 	// make sure this is a valid node
-	if _, ok := nodeCache[id]; !ok {
+	if !nodes.NodeCacheHas(id) {
 		log.Printf("%s is not a valid node.", id)
 		return false
 	}
-
 	return true
 }
 
