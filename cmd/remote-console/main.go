@@ -39,6 +39,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/conman"
+	"github.com/OpenCHAMI/remote-console/internal/logs"
 )
 
 var (
@@ -91,7 +92,19 @@ func main() {
 	// respinAggLog()
 
 	// Initialize and start log rotation
-	console.LogRotate()
+	// Convert CurrentNodes to use the NodeInfo interface
+	adaptedNodes := make(map[string]logs.NodeInfo)
+	for k, v := range console.CurrentNodes {
+		adaptedNodes[k] = &console.NodeInfoAdapter{NodeConsoleInfo: v}
+	}
+	
+	logDeps := logs.RotationDeps{
+		CurrNodesMutex:  console.CurrNodesMutex,
+		CurrentNodes:    adaptedNodes,
+		SignalConmanHUP: conman.SignalConmanHUP,
+		EnsureDirPresent: console.EnsureDirPresent,
+	}
+	logs.LogRotate(logDeps)
 
 	// spin a thread that watches for changes in console configuration
 	log.Printf("Starting hardware watch loop...")
@@ -102,8 +115,8 @@ func main() {
 		CurrNodesMutex: console.CurrNodesMutex,
 		CurrentNodes:   console.CurrentNodes,
 		DebugOnly:      console.DebugOnly,
-		AggregateFile:  console.AggregateFile, // you may need to export this
-		LogPipeOutput:  console.LogPipeOutput, // you may need to export this
+		AggregateFile:  logs.AggregateFile,
+		LogPipeOutput:  logs.LogPipeOutput,
 		GetPasswordsWithRetries: creds.GetPasswordsWithRetries,
 		SetPreviousPasswords:    creds.SetPreviousPasswords,
 	})

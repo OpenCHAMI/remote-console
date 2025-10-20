@@ -60,6 +60,15 @@ var CurrNodesMutex = &sync.Mutex{}
 // CurrentNodes is the map of all nodes being monitored
 var CurrentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo) // [xname,*consoleInfo]
 
+// NodeInfoAdapter adapts types.NodeConsoleInfo to logs.NodeInfo interface
+type NodeInfoAdapter struct {
+	*types.NodeConsoleInfo
+}
+
+func (n *NodeInfoAdapter) GetNodeName() string {
+	return n.NodeName
+}
+
 // NodeConsoleInfo type moved to internal/types package
 
 // Struct to hold hsm redfish endpoint information

@@ -1,4 +1,3 @@
-//
 //  MIT License
 //
 //  (C) Copyright 2021-2023 Hewlett Packard Enterprise Development LP
@@ -24,21 +23,34 @@
 
 // This file contains the code needed to handle log rotation inside the console pod.
 
-package console
+package logs
 
 import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// RotationDeps defines dependencies needed for log rotation
+type RotationDeps struct {
+	CurrNodesMutex  *sync.Mutex
+	CurrentNodes    map[string]NodeInfo
+	SignalConmanHUP func()
+	EnsureDirPresent func(dir string, perm os.FileMode) (bool, error)
+}
+
+// NodeInfo interface to avoid import cycles
+type NodeInfo interface {
+	GetNodeName() string
+}
 
 // NOTE: the backup directory is on the shared console-operator pvc
 const logRotDir string = "/var/log/conman.old"
@@ -59,10 +71,19 @@ var logRotConNumRotate int = 2       // number of console log backup copies to k
 var logRotAggFileSize string = "20M" // size of the aggregation file to rotate
 var logRotAggNumRotate int = 1       // number of aggregation backup copies to keep
 
-// Initialize and start log rotation
-func LogRotate() {
+var rotDeps *RotationDeps
+
+// SetRotationDeps sets the dependencies for log rotation
+func SetRotationDeps(deps *RotationDeps) {
+	rotDeps = deps
+}
+
+// LogRotate initializes and starts log rotation
+func LogRotate(deps RotationDeps) {
+	rotDeps = &deps
+	
 	// Set up the 'backups' directory for logrotation to use
-	EnsureDirPresent(logRotDir, 0755)
+	deps.EnsureDirPresent(logRotDir, 0755)
 
 	// Check for log rotation env vars
 	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
@@ -77,7 +98,7 @@ func LogRotate() {
 		log.Printf("Found LOG_ROTATE_SEC_FREQ: %s", val)
 		envFreq, err := strconv.Atoi(val)
 		if err != nil {
-			log.Printf("Error converting log rotation freqency - expected an integer:%s", err)
+			log.Printf("Error converting log rotation frequency - expected an integer:%s", err)
 		} else {
 			logRotCheckFreqSec = envFreq
 		}
@@ -86,7 +107,7 @@ func LogRotate() {
 		log.Printf("Found LOG_ROTATE_NUM_KEEP: %s", val)
 		envNum, err := strconv.Atoi(val)
 		if err != nil {
-			log.Printf("Error converting log rotation freqency - expected an integer:%s", err)
+			log.Printf("Error converting log rotation number - expected an integer:%s", err)
 		} else {
 			logRotConNumRotate = envNum
 		}
@@ -104,84 +125,44 @@ func LogRotate() {
 	go doLogRotate()
 }
 
-// All the ways a string could be interpreted as 'true'
-func isTrue(str string) bool {
-	// convert to lower case to remove capitalization as an issue
-	lStr := strings.ToLower(str)
+// UpdateLogRotateConf updates the log rotation configuration file
+func UpdateLogRotateConf() {
+	if rotDeps != nil {
+		rotDeps.CurrNodesMutex.Lock()
+		defer rotDeps.CurrNodesMutex.Unlock()
+		updateLogRotateConf()
+	}
+}
 
-	// deal with one char possible values for true
+func isTrue(str string) bool {
+	lStr := strings.ToLower(str)
 	if len(lStr) == 1 && (lStr[0] == 't' || lStr[0] == '1') {
 		return true
 	}
-
-	// deal with multiple char possible values for true
 	if len(lStr) > 1 && lStr == "true" {
 		return true
 	}
-
-	// treat everything else as false
 	return false
 }
 
-// Do the initial log rotation file update in a thread safe manner
 func doInitialConfFileUpdate() {
-	// Make sure the initial log rotation file doesn't miss or overwrite
-	// the initial batch of consoles being monitored.
-
-	// put a lock on the current nodes while writing the file
-	CurrNodesMutex.Lock()
-	defer CurrNodesMutex.Unlock()
-
-	// update the file now that it is safe to do so
+	if rotDeps == nil {
+		return
+	}
+	rotDeps.CurrNodesMutex.Lock()
+	defer rotDeps.CurrNodesMutex.Unlock()
 	updateLogRotateConf()
 }
 
-// Create the log rotation configuration file
 func updateLogRotateConf() {
-	// NOTE: calling function needs to ensure current node maps are
-	//  thread protected
-	// NOTE: in doGetNewNodes thread
-	// NOTE: also in initial configuration
-
-	// This is the default format supplied by the install of
-	// the conman package.
-	// NOTE: conmand needs the '-HUP' signal to reconnect to
-	//  log files after they have been moved/removed.  We will
-	//  do that ourselves so are removing it from the conf file.
-	/*
-		# /var/log/conman/* {
-		#   compress
-		#   missingok
-		#   nocopytruncate
-		#   nocreate
-		#   nodelaycompress
-		#   nomail
-		#   notifempty
-		#   olddir /var/log/conman.old/
-		#   rotate 4
-		#   sharedscripts
-		#   size=5M
-		#   weekly
-		#   postrotate
-		#     /usr/bin/killall -HUP conmand
-		#   endscript
-		# }
-	*/
-
-	// Open the file for writing
 	log.Printf("LOG ROTATE: Opening conman log rotation configuration file for output: %s", logRotConfFile)
 	lrf, err := os.Create(logRotConfFile)
 	if err != nil {
-		// log the problem and panic
 		log.Printf("Unable to open config file to write: %s", err)
+		return
 	}
 	defer lrf.Close()
 
-	// We need to do log rotation ONLY for the logs this pod is
-	//  actively managing.  Each log file needs to be given a separate
-	//  entry in the file.
-
-	// Write out the contents of the file
 	fmt.Fprintln(lrf, "# Auto-generated conman log rotation configuration file.")
 
 	// Add the aggregation file
@@ -195,17 +176,18 @@ func updateLogRotateConf() {
 	}
 
 	// Add all nodes
-	consoleLogBackupDir := "/var/log/conman.old"
-	for _, cni := range CurrentNodes {
-		xname := cni.NodeName
-		fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
-		writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
+	if rotDeps != nil {
+		consoleLogBackupDir := "/var/log/conman.old"
+		for _, cni := range rotDeps.CurrentNodes {
+			xname := cni.GetNodeName()
+			fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
+			writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
+		}
 	}
 
 	fmt.Fprintln(lrf, "")
 }
 
-// helper function to write out a single entry in the config file
 func writeConfigEntry(lrf *os.File, fileName string, oldDir string, numRotate int, fileSize string) {
 	fmt.Fprintf(lrf, "%s { \n", fileName)
 	fmt.Fprintln(lrf, "  nocompress")
@@ -221,77 +203,53 @@ func writeConfigEntry(lrf *os.File, fileName string, oldDir string, numRotate in
 	fmt.Fprintln(lrf, "}")
 }
 
-// Parse the timestamp from the input line
 func parseTimestamp(line string) (string, time.Time, bool, bool) {
-	// NOTE: we are expecting a line in the format of:
-	//  "/var/log/conman/console.xname" YYYY-MM-DD-HH-MM-SS
 	var nodeName string
 	var fd time.Time
 	isCon := false
 	isAgg := false
 
-	// if the line does not have a valid console log name, skip
 	const filePrefix string = "/var/log/conman/console."
 	timeStampStr := ""
 	pos := strings.Index(line, filePrefix)
 	nodeStPos := 0
 	if pos != -1 {
-		// found a node log file - pull out the node name and time stamp string
 		nodeStPos = pos + len(filePrefix)
-
-		// pull out the node name
 		posQ2 := strings.Index(line[nodeStPos:], "\"")
 		if posQ2 == -1 {
-			// unexpected - should be a " char at the end of the filename
 			log.Printf("  Unexpected file format - expected quote to close filename")
 			return nodeName, fd, isCon, isAgg
 		}
-
-		// reindex for position in entire line and split
 		posQ2 += nodeStPos
 		nodeName = line[nodeStPos:posQ2]
 		timeStampStr = line[posQ2+2:]
 		isCon = true
 	} else {
-		// see if this is the console aggregation log file
 		pos = strings.Index(line, conAggLogFile)
 		if pos == -1 {
-			// no log files on this line
 			return nodeName, fd, isCon, isAgg
 		}
-
-		// we are dealing with the console aggregation log
 		nodeName = "consoleAgg.log"
 		isAgg = true
-
-		// pull out the position of the timestamp
 		timeStampStr = line[len(conAggLogFile)+pos+2:]
 	}
 
-	// process the line
 	var year, month, day, hour, min, sec int
 	_, err := fmt.Sscanf(timeStampStr, "%d-%d-%d-%d:%d:%d", &year, &month, &day, &hour, &min, &sec)
 	if err != nil {
-		// log the error and skip processing this line
 		log.Printf("Error parsing timestamp: %s, %s", timeStampStr, err)
 		return nodeName, fd, false, false
 	}
-	// current timestamp of this log rotation entry
 	fd = time.Date(year, time.Month(month), day, hour, min, sec, 0, time.Local)
 
 	return nodeName, fd, isCon, isAgg
 }
 
-// Function to collect most recent log rotation timestamps
 func readLogRotTimestamps(fileStamp map[string]time.Time) (conChanged, aggChanged bool) {
-	// read the timestamps from the log rotation state file
 	log.Printf("LOG ROTATE: Reading log rotation timestamps")
-
-	// return true if something has changed, may need to restart conmand or aggregation log
 	conChanged = false
 	aggChanged = false
 
-	// open the state file
 	sf, err := os.Open(logRotStateFile)
 	if err != nil {
 		log.Printf("Unable to open log rotation state file %s: %s", logRotStateFile, err)
@@ -299,25 +257,17 @@ func readLogRotTimestamps(fileStamp map[string]time.Time) (conChanged, aggChange
 	}
 	defer sf.Close()
 
-	// process the lines in the file
-	// NOTE: we will only look for files with console.xname
 	er := bufio.NewReader(sf)
 	for {
-		// read the next line
 		line, err := er.ReadString('\n')
 		if err != nil {
-			// done reading file
 			break
 		}
 
-		// parse this file timestamp
 		if fileName, fd, isCon, isAgg := parseTimestamp(line); isCon || isAgg {
-			// see if this file already is in the map
 			if _, ok := fileStamp[fileName]; ok {
-				// entry present, check for timestamp equality
 				if fileStamp[fileName] != fd {
 					log.Printf("LOG ROTATE:  %s rotated", fileName)
-					// update and mark change
 					fileStamp[fileName] = fd
 					if isCon {
 						conChanged = true
@@ -326,7 +276,6 @@ func readLogRotTimestamps(fileStamp map[string]time.Time) (conChanged, aggChange
 					}
 				}
 			} else {
-				// not already present in the map so add it and mark change
 				log.Printf("LOG ROTATE:  %s new file - added to map", fileName)
 				fileStamp[fileName] = fd
 				if isCon {
@@ -341,41 +290,28 @@ func readLogRotTimestamps(fileStamp map[string]time.Time) (conChanged, aggChange
 	return conChanged, aggChanged
 }
 
-// Function to periodically do the log rotation
 func doLogRotate() {
-	// put an initial delay into starting log rotation to allow things to come up
 	time.Sleep(120 * time.Second)
 
-	// turn the check frequency into a valid time duration
 	sleepSecs := time.Duration(300) * time.Second
 	if logRotCheckFreqSec > 0 {
-		// make sure we have a valid number before converting
 		sleepSecs = time.Duration(logRotCheckFreqSec) * time.Second
 	} else {
-		log.Printf("Log rotation freqency invalid, defaulting to 5 min. Input value:%d", logRotCheckFreqSec)
+		log.Printf("Log rotation frequency invalid, defaulting to 5 min. Input value:%d", logRotCheckFreqSec)
 	}
 
-	// keep track of last rotate time for all log files - need to kick
-	// conmand if any log files changed.
 	fileStamp := make(map[string]time.Time)
 	readLogRotTimestamps(fileStamp)
 
-	// loop forever waiting the correct period between checking for log rotations
 	for {
-		// if log rotation is enabled, do the check
 		if logRotEnabled {
 			rotateLogsOnce(fileStamp)
 		}
-
-		// sleep until the next check time
 		time.Sleep(sleepSecs)
 	}
 }
 
 func rotateLogsOnce(fileStamp map[string]time.Time) {
-	// kick off the log rotation command
-	// NOTE: using explicit state file to insure it is on pvc storage and
-	//  to be able to parse it after completion.
 	log.Print("LOG ROTATE: Starting logrotate")
 	cmd := exec.Command("logrotate", "-s", logRotStateFile, logRotConfFile)
 	exitCode := -1
@@ -383,30 +319,27 @@ func rotateLogsOnce(fileStamp map[string]time.Time) {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exitCode = ee.ProcessState.ExitCode()
-			log.Printf("Exit Errro: %s", ee)
+			log.Printf("Exit Error: %s", ee)
 		}
 	} else {
 		exitCode = 0
 	}
 	log.Printf("LOG ROTATE: Log Rotation completed with exit code: %d", exitCode)
 
-	// see if files were actually rotated - kick conmand if needed
 	if conChanged, aggChanged := readLogRotTimestamps(fileStamp); conChanged || aggChanged {
-		// Give a slight pause to let the system catch up
 		time.Sleep(5 * time.Second)
 
-		// conman must be signaled to reconnect to moved log files
 		if conChanged {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
-			conman.SignalConmanHUP()
+			if rotDeps != nil && rotDeps.SignalConmanHUP != nil {
+				rotDeps.SignalConmanHUP()
+			}
 		}
 
-		// the aggregation log must be restarted for moved file
 		if aggChanged {
-			respinAggLog()
+			RespinAggLog()
 		}
 	} else {
 		log.Print("LOG ROTATE: No log files changed with logrotate")
 	}
-
 }

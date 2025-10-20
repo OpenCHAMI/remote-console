@@ -1,0 +1,172 @@
+//  MIT License
+//
+//  (C) Copyright 2020-2022, 2024 Hewlett Packard Enterprise Development LP
+//
+//  Permission is hereby granted, free of charge, to any person obtaining a
+//  copy of this software and associated documentation files (the "Software"),
+//  to deal in the Software without restriction, including without limitation
+//  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+//  and/or sell copies of the Software, and to permit persons to whom the
+//  Software is furnished to do so, subject to the following conditions:
+//
+//  The above copyright notice and this permission notice shall be included
+//  in all copies or substantial portions of the Software.
+//
+//  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+//  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+//  OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+//  ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+//  OTHER DEALINGS IN THE SOFTWARE.
+//
+
+// This file contains the code needed to handle aggregation of log files
+
+package logs
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/hpcloud/tail"
+)
+
+// Global vars
+var conAggMutex = &sync.Mutex{}
+var conAggLogger *log.Logger = nil
+
+// Globals to build up the aggregation file name for this pod
+const conAggLogFileBase string = "/tmp/consoleAgg/consoleAgg-"
+
+var conAggLogFile string = ""
+
+// map to cancel threads tailing log files
+var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
+
+// AggregateFile sets up tailing a log file to add to the aggregation file
+func AggregateFile(xname string) bool {
+	newFile := false
+	if _, ok := tailThreads[xname]; !ok {
+		// indicate we are starting to watch this one
+		newFile = true
+		// set up a context and a cancel function for this thread
+		ctx, cancel := context.WithCancel(context.Background())
+		tailThreads[xname] = &cancel
+
+		// record being tracked and forward log file contents
+		go watchConsoleLogFile(ctx, xname)
+	}
+	return newFile
+}
+
+// StopTailing stops tailing a console log file
+func StopTailing(xname string) {
+	if cancel, ok := tailThreads[xname]; ok {
+		(*cancel)()
+		delete(tailThreads, xname)
+	}
+}
+
+// LogPipeOutput takes the output of a pipe and logs it
+func LogPipeOutput(readPipe *io.ReadCloser, desc string) {
+	log.Printf("Starting log of conmand %s output", desc)
+	er := bufio.NewReader(*readPipe)
+	for {
+		// read the next line
+		line, err := er.ReadString('\n')
+		if err != nil {
+			log.Printf("Ending %s logging from error:%s", desc, err)
+			break
+		}
+		log.Print(line)
+	}
+}
+
+// watchConsoleLogFile tails a console log file and writes to aggregation log
+func watchConsoleLogFile(ctx context.Context, xname string) {
+	filename := fmt.Sprintf("/var/log/conman/console.%s", xname)
+	log.Printf("Setting up tail of %s", filename)
+
+	// set up a tail operation on the console file
+	t, err := tail.TailFile(filename, tail.Config{Follow: true, ReOpen: true})
+	if err != nil {
+		log.Printf("Error setting up tail on file %s:%s", filename, err)
+		return
+	}
+
+	log.Printf("Starting tail process loop for %s", xname)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Cancelling tail of %s", xname)
+			t.Stop()
+			return
+		case line := <-t.Lines:
+			if line.Err != nil {
+				log.Printf("Error reading line from %s:%s", xname, line.Err)
+				continue
+			}
+			writeToAggLog(xname, line.Text)
+		}
+	}
+}
+
+// writeToAggLog writes a line to the aggregation log with proper locking
+func writeToAggLog(xname, line string) {
+	conAggMutex.Lock()
+	defer conAggMutex.Unlock()
+
+	if conAggLogger == nil {
+		return
+	}
+
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	conAggLogger.Printf("%s [%s] %s", timestamp, xname, line)
+}
+
+// RespinAggLog reopens the aggregation log file (after rotation)
+func RespinAggLog() {
+	conAggMutex.Lock()
+	defer conAggMutex.Unlock()
+
+	if conAggLogFile == "" {
+		// build up the aggregation file name
+		hostname, err := os.Hostname()
+		if err != nil {
+			log.Printf("Error getting hostname:%s", err)
+			hostname = "unknown"
+		}
+		conAggLogFile = fmt.Sprintf("%s%s.log", conAggLogFileBase, hostname)
+	}
+
+	// ensure the directory exists
+	dir := filepath.Dir(conAggLogFile)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("Error creating aggregation log directory %s:%s", dir, err)
+		return
+	}
+
+	// open/create the aggregation log file
+	calf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		log.Printf("Error opening aggregation log file %s:%s", conAggLogFile, err)
+		return
+	}
+
+	if conAggLogger == nil {
+		log.Printf("Started aggregation log file: %s", conAggLogFile)
+	} else {
+		log.Printf("Restarted aggregation log file: %s", conAggLogFile)
+	}
+
+	conAggLogger = log.New(calf, "", 0)
+	conAggLogger.Print("Starting aggregation log")
+}

@@ -27,6 +27,7 @@ package console
 import (
 	"time"
 	"github.com/OpenCHAMI/remote-console/internal/conman"
+	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
@@ -75,7 +76,7 @@ func doGetNewNodes() {
 		if len(names_map) != 0 {
 			changed = true
 			for name, _ := range names_map {
-				stopTailing(name)
+				logs.StopTailing(name)
 				delete(CurrentNodes, name)
 
 			}
@@ -96,7 +97,7 @@ func doGetNewNodes() {
 		conman.SignalConmanTERM()
 
 		// rebuild the log rotation configuration file
-		updateLogRotateConf() //TODO: look at this to make sure
+		logs.UpdateLogRotateConf()
 	}
 
 }
