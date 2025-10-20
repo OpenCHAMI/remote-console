@@ -129,7 +129,7 @@ func main() {
 	})
 
 	// start the thread that will make sure that the conman creds are correct
-	go creds.CredMonitor(nodes.CurrNodesMutex, nodes.CurrentNodes, conman.SignalConmanTERM)
+	conman.SignalConmanTERM()
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs

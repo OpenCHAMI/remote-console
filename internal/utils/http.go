@@ -33,7 +33,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 )
 
 type ErrResponse struct {

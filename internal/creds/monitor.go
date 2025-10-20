@@ -6,25 +6,28 @@
 package creds
 
 import (
-    "log"
-    "sync"
-    "time"
-    "github.com/OpenCHAMI/remote-console/internal/types"
-)// Time to wait between checking for credential changes
+	"log"
+	"time"
+
+	"github.com/OpenCHAMI/remote-console/internal/conman"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
+)
+
+// Time to wait between checking for credential changes
 var MonitorIntervalSecs int = 30
 
 // function to do check for credential changes and restart conman if necessary
-func checkForChanges(currNodesMutex *sync.Mutex, currentNodes map[string]*types.NodeConsoleInfo, signalConmanTERM func()) {
+func checkForChanges() {
 	restartConman := false
 
 	var xnames []string = nil
 	sshKeyAuth := false
 
-	currNodesMutex.Lock()
+	nodes.CurrNodesMutex.Lock()
 	{
-		defer currNodesMutex.Unlock()
+		defer nodes.CurrNodesMutex.Unlock()
 
-		for _, nci := range currentNodes {
+		for _, nci := range nodes.CurrentNodes {
 			if nci.IsIPMI() || nci.IsPassSSH() {
 				xnames = append(xnames, nci.BmcName)
 			} else if nci.IsKeySSH() {
@@ -33,7 +36,7 @@ func checkForChanges(currNodesMutex *sync.Mutex, currentNodes map[string]*types.
 		}
 	}
 
-	if sshKeyAuth && checkIfKeysChanged(currNodesMutex) {
+	if sshKeyAuth && checkIfKeysChanged() {
 		restartConman = true
 	}
 
@@ -42,15 +45,15 @@ func checkForChanges(currNodesMutex *sync.Mutex, currentNodes map[string]*types.
 	}
 
 	if restartConman {
-		signalConmanTERM()
+		conman.SignalConmanTERM()
 	}
 }
 
 // function to continuously monitor for changes that require conman to restart
-func CredMonitor(currNodesMutex *sync.Mutex, currentNodes map[string]*types.NodeConsoleInfo, signalConmanTERM func()) {
+func CredMonitor() {
 	time.Sleep(time.Duration(MonitorIntervalSecs) * time.Second)
 	for {
-		checkForChanges(currNodesMutex, currentNodes, signalConmanTERM)
+		checkForChanges()
 		time.Sleep(time.Duration(MonitorIntervalSecs) * time.Second)
 	}
 }
@@ -76,8 +79,8 @@ func checkIfPasswordsChanged(xnames []string) bool {
 	return false
 }
 
-func checkIfKeysChanged(currNodesMutex *sync.Mutex) bool {
-	currNodesMutex.Lock()
-	defer currNodesMutex.Unlock()
+func checkIfKeysChanged() bool {
+	nodes.CurrNodesMutex.Lock()
+	defer nodes.CurrNodesMutex.Unlock()
 	return EnsureConsoleKeysPresent()
 }
