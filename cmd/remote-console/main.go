@@ -75,7 +75,7 @@ func main() {
 	log.Printf("Remote console service starting")
 	// Set up the zombie killer
 	log.Printf("Starting zombie killer...")
-	//go console.WatchForZombies()
+	//go conman.WatchForZombies()
 
 	// first we set up the goroutine that polls the hsm
 	go console.WatchHardware()

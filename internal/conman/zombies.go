@@ -24,7 +24,7 @@
 
 // This file contains the code needed to handle zombie processes
 
-package console
+package conman
 
 import (
 	"bytes"
@@ -38,11 +38,12 @@ import (
 )
 
 // NOTE:  Any time a container is started with a particular application running
-//  as nid0, that process is required to handle any zombie processes that are
+//  as pid 1, that process is required to handle any zombie processes that are
 //  orphaned in the pod.  This is a process running in the background that will
 //  find zombie processes and terminate them cleanly.
 
-// Function to scan the process table for zombie processes
+// WatchForZombies scans the process table for zombie processes and cleans them up.
+// This should be run as a background goroutine when the application runs as pid 1.
 func WatchForZombies() {
 	for {
 		// get the process information from the system
@@ -57,7 +58,7 @@ func WatchForZombies() {
 	}
 }
 
-// Find all the current zombie processes
+// findZombies finds all the current zombie processes
 func findZombies() []int {
 	var zombies []int = nil
 	var outBuf bytes.Buffer
@@ -97,7 +98,7 @@ func findZombies() []int {
 	return zombies
 }
 
-// Kill (wait for) the zombie process with the given pid
+// killZombie kills (waits for) the zombie process with the given pid
 func killZombie(pid int) {
 	log.Printf("Killing zombie process: %d", pid)
 	p, err := os.FindProcess(pid)
