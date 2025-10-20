@@ -27,13 +27,14 @@
 package nodes
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
-	"strings"
-	"sync"
+		"encoding/json"
+		"fmt"
+		"log"
+		"strings"
+		"sync"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+		"github.com/OpenCHAMI/remote-console/internal/types"
+		"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 var (
@@ -95,7 +96,7 @@ func getRedfishEndpoints() ([]redfishEndpoint, error) {
 
 	// Query hsm to get the redfish endpoints
 	URL := HsmURL + "hsm/v2/Inventory/RedfishEndpoints"
-	data, _, err := getURL(URL, nil)
+		data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get redfish endpoints from hsm:%s", err)
 		return nil, err
@@ -121,7 +122,7 @@ func getStateComponents() ([]stateComponent, error) {
 
 	// get the state components from hsm
 	URL := HsmURL + "hsm/v2/State/Components"
-	data, _, err := getURL(URL, nil)
+		data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get state component information from hsm:%s", err)
 		return nil, err
@@ -168,7 +169,7 @@ func getParadiseNodes() (map[string]struct{}, error) {
 	// NOTE: this only pulls the Foxconn BMCs from the inventory so there is a bit of
 	//  server side filtering going on
 	URL := HsmURL + "hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
-	data, _, err := getURL(URL, nil)
+		data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get hardware inventory from hsm:%s", err)
 		return nil, err

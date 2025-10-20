@@ -41,6 +41,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 var (
@@ -82,7 +83,7 @@ func main() {
 	go nodes.WatchHardware()
 
 	// then we set up the goroutine that controls conman
-	_, err := console.EnsureDirPresent("/var/log/conman", 0755)
+	_, err := utils.EnsureDirPresent("/var/log/conman", 0755)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -99,12 +100,12 @@ func main() {
 		adaptedNodes[k] = &nodes.NodeInfoAdapter{NodeConsoleInfo: v}
 	}
 
-	logDeps := logs.RotationDeps{
-		CurrNodesMutex:   nodes.CurrNodesMutex,
-		CurrentNodes:     adaptedNodes,
-		SignalConmanHUP:  conman.SignalConmanHUP,
-		EnsureDirPresent: console.EnsureDirPresent,
-	}
+	   logDeps := logs.RotationDeps{
+		   CurrNodesMutex:   nodes.CurrNodesMutex,
+		   CurrentNodes:     adaptedNodes,
+		   SignalConmanHUP:  conman.SignalConmanHUP,
+		   EnsureDirPresent: utils.EnsureDirPresent,
+	   }
 	logs.LogRotate(logDeps)
 
 	// spin a thread that watches for changes in console configuration

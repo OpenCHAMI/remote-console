@@ -27,10 +27,11 @@
 package console
 
 import (
-	"fmt"
-	"log"
-	"net/http"
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+		"fmt"
+		"log"
+		"net/http"
+		"github.com/OpenCHAMI/remote-console/internal/nodes"
+		"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 type HealthService interface {
@@ -53,12 +54,12 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 	//  administrators to aid in determining the health of this service.
 
 	// only allow 'GET' calls
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		sendJSONError(w, http.StatusMethodNotAllowed,
-			fmt.Sprintf("(%s) Not Allowed", r.Method))
-		return
-	}
+	   if r.Method != http.MethodGet {
+		   w.Header().Set("Allow", "GET")
+		   utils.SendJSONError(w, http.StatusMethodNotAllowed,
+			   fmt.Sprintf("(%s) Not Allowed", r.Method))
+		   return
+	   }
 
 	// get the current health status
 	stats := getCurrentHealth()
@@ -67,7 +68,7 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Health check: %s", stats)
 
 	// write the output
-	SendResponseJSON(w, http.StatusOK, stats)
+		utils.SendResponseJSON(w, http.StatusOK, stats)
 	return
 }
 
@@ -87,12 +88,12 @@ func doLiveness(w http.ResponseWriter, r *http.Request) {
 	//  used to indicate the server is still alive and processing requests.
 
 	// only allow 'GET' calls
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		sendJSONError(w, http.StatusMethodNotAllowed,
-			fmt.Sprintf("(%s) Not Allowed", r.Method))
-		return
-	}
+	   if r.Method != http.MethodGet {
+		   w.Header().Set("Allow", "GET")
+		   utils.SendJSONError(w, http.StatusMethodNotAllowed,
+			   fmt.Sprintf("(%s) Not Allowed", r.Method))
+		   return
+	   }
 
 	// return simple StatusOK response to indicate server is alive
 	w.WriteHeader(http.StatusNoContent)
@@ -107,7 +108,7 @@ func doReadiness(w http.ResponseWriter, r *http.Request) {
 	// only allow 'GET' calls
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
-		sendJSONError(w, http.StatusMethodNotAllowed,
+		utils.SendJSONError(w, http.StatusMethodNotAllowed,
 			fmt.Sprintf("(%s) Not Allowed", r.Method))
 		return
 	}

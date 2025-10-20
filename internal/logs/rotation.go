@@ -44,7 +44,7 @@ type RotationDeps struct {
 	CurrNodesMutex  *sync.Mutex
 	CurrentNodes    map[string]NodeInfo
 	SignalConmanHUP func()
-	EnsureDirPresent func(dir string, perm os.FileMode) (bool, error)
+		EnsureDirPresent func(dir string, perm os.FileMode) (bool, error)
 }
 
 // NodeInfo interface to avoid import cycles
@@ -83,7 +83,7 @@ func LogRotate(deps RotationDeps) {
 	rotDeps = &deps
 	
 	// Set up the 'backups' directory for logrotation to use
-	deps.EnsureDirPresent(logRotDir, 0755)
+		deps.EnsureDirPresent(logRotDir, 0755)
 
 	// Check for log rotation env vars
 	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
