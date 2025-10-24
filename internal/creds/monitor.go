@@ -7,7 +7,6 @@ package creds
 
 import (
 	"log"
-	"time"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
@@ -18,7 +17,7 @@ type SignalConmanTERM func ()
 var MonitorIntervalSecs int = 30
 
 // function to do check for credential changes and restart conman if necessary
-func checkForChanges(sigTERMConman SignalConmanTERM) {
+func CheckForUpdates() bool{
 	restartConman := false
 
 	var xnames []string = nil
@@ -33,6 +32,8 @@ func checkForChanges(sigTERMConman SignalConmanTERM) {
 		}
 	}
 
+	log.Printf("sshKeyAuth: %v", sshKeyAuth) 
+
 	if sshKeyAuth && checkIfKeysChanged() {
 		restartConman = true
 	}
@@ -41,23 +42,12 @@ func checkForChanges(sigTERMConman SignalConmanTERM) {
 		restartConman = true
 	}
 
-	if restartConman {
-		sigTERMConman()
-	}
+	return restartConman
 }
 
-// function to continuously monitor for changes that require conman to restart
-func CredMonitor(conman SignalConmanTERM) {
-	time.Sleep(time.Duration(MonitorIntervalSecs) * time.Second)
-	for {
-		checkForChanges(conman)
-		time.Sleep(time.Duration(MonitorIntervalSecs) * time.Second)
-	}
-}
 
 func checkIfPasswordsChanged(xnames []string) bool {
-	prevPasswords := GetPreviousPasswords()
-	if prevPasswords == nil {
+	if previousPasswords == nil {
 		return false
 	}
 	currentPasswords := GetPasswords(xnames)
@@ -67,7 +57,7 @@ func checkIfPasswordsChanged(xnames []string) bool {
 			log.Printf("Missing credentials detected for %s while checking for credential changes", xname)
 			continue
 		}
-		previousCreds, _ := prevPasswords[xname]
+		previousCreds, _ := previousPasswords[xname]
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
 			log.Printf("Change detected in the river passwords.  Conman will be reconfigured.")
 			return true

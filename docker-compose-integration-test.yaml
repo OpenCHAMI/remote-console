@@ -7,17 +7,17 @@ networks:
   rcs:
 
 services:
-  integration-tests:
-    build:
-      context: .
-      dockerfile: Dockerfile.integration.test
-    environment:
-      - API_URL=http://remote-console
-      - API_SERVER_PORT=:28007
-    depends_on:
-      - remote-console
-    networks:
-      - rcs
+  # integration-tests:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.integration.test
+  #   environment:
+  #     - API_URL=http://remote-console
+  #     - API_SERVER_PORT=:28007
+  #   depends_on:
+  #     - remote-console
+  #   networks:
+  #     - rcs
   remote-console:
     build:
       context: .
@@ -29,12 +29,15 @@ services:
       - CRAY_VAULT_JWT_FILE=configs/token
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=hms
-      - VAULT_KEYPATH=hms-creds
+      - VAULT_BASE_PATH=hms-creds
       - VAULT_SKIP_VERIFY=true
       - VAULT_ENABLED=true
       - LOG_LEVEL=DEBUG
     depends_on:
       - smd
+      - x0c0s1b0
+      - x0c0s2b0
+      - x0c0s2b1
     networks:
       - rcs
   vault:
@@ -48,6 +51,8 @@ services:
       - IPC_LOCK
     networks:
       - rcs
+    ports:
+      - "8200:8200"
   vault-kv-enabler:
     build:
       context: .
@@ -113,3 +118,138 @@ services:
       - vault
     networks:
       - rcs
+    ports:
+      - "27779:27779"
+  vault-key-loader:
+    image: docker.io/library/vault:1.5.5
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=hms
+      - VAULT_BASE_PATH=hms-creds
+    volumes:
+      - /home/cjh/.ssh/console-test:/tmp/bmc-console-key:ro
+    command: >
+      sh -c "
+      until vault status 2>/dev/null; do
+        echo 'Waiting for vault...'
+        sleep 2
+      done &&
+      ls /tmp/bmc-console-key &&
+      vault kv put $$VAULT_BASE_PATH/bmc-console-keys PrivateKey=@/tmp/bmc-console-key
+      "
+    depends_on:
+      - vault
+    networks:
+      - rcs
+  rf-loader:
+    image: library/golang:1.24-alpine
+    command: >
+      sh -c "apk add curl && sleep 10 &&
+      curl -X POST -d '{\"RedfishEndpoints\":[{
+        \"ID\":\"x0c0s1b0\",
+        \"FQDN\":\"x0c0s1b0\",
+        \"RediscoverOnUpdate\":false,
+        \"User\":\"admin\",
+        \"Password\":\"admin\"
+      },{
+        \"ID\":\"x0c0s2b0\",
+        \"FQDN\":\"x0c0s2b0\",
+        \"RediscoverOnUpdate\":false,
+        \"User\":\"admin\",
+        \"Password\":\"admin\"
+      },{
+        \"ID\":\"x0c0s2b1\",
+        \"FQDN\":\"x0c0s2b1\",
+        \"RediscoverOnUpdate\":false,
+        \"User\":\"ADMIN\",
+        \"Password\":\"ADMIN\"}
+      ]}' http://smd:27779/hsm/v2/Inventory/RedfishEndpoints"
+    depends_on:
+      - smd
+    networks:
+      - rcs
+  component-loader:
+    image: library/golang:1.24-alpine
+    command: >
+      sh -c "apk add curl && sleep 10 &&
+      curl -X POST -H 'Content-Type: application/json' -d '{\"Components\":[{
+        \"ID\":\"x0c0s1b0n0\",
+        \"Type\":\"Node\",
+        \"State\":\"Ready\",
+        \"Flag\":\"OK\",
+        \"Enabled\":true,
+        \"Role\":\"Compute\",
+        \"Arch\":\"X86\"
+      },{
+        \"ID\":\"x0c0s2b0n0\",
+        \"Type\":\"Node\",
+        \"State\":\"Ready\",
+        \"Flag\":\"OK\",
+        \"Enabled\":true,
+        \"Role\":\"Compute\",
+        \"Arch\":\"X86\",
+        \"Class\": \"Mountain\"
+      },{
+        \"ID\":\"x0c0s2b1n0\",
+        \"Type\":\"Node\",
+        \"State\":\"Ready\",
+        \"Flag\":\"OK\",
+        \"Enabled\":true,
+        \"Role\":\"Compute\",
+        \"Arch\":\"X86\",
+        \"Class\": \"River\"
+      }]}' http://smd:27779/hsm/v2/State/Components &&
+      sleep 2 &&
+      curl -X POST -H 'Content-Type: application/json' -d '{
+        \"Hardware\":[{
+          \"ID\":\"x0c0s1b0n0\",
+          \"Type\":\"Node\",
+          \"Ordinal\":0,
+          \"Status\":\"Populated\",
+          \"HWInventoryByLocationType\":\"Node\",
+          \"NodeLocationInfo\":{
+            \"Id\":\"x0c0s1b0n0\",
+            \"Name\":\"node0\",
+            \"Hostname\":\"x0c0s1b0n0\",
+            \"Type\":\"Node\"
+          },
+          \"PopulatedFRU\":{
+            \"Type\":\"Node\",
+            \"NodeFRUInfo\":{
+              \"Model\":\"HPE Cray Supercomputing XD224\",
+              \"Manufacturer\":\"Foxconn\"
+            }
+          }
+        }]
+      }' http://smd:27779/hsm/v2/Inventory/Hardware"
+    depends_on:
+      - smd
+    networks:
+      - rcs
+  x0c0s1b0:
+    image: linuxserver/openssh-server:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - PASSWORD_ACCESS=true
+      - USER_NAME=admin
+      - USER_PASSWORD=admin
+    ports:
+      - 2221:2222
+  x0c0s2b0:
+    image: linuxserver/openssh-server:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - USER_NAME=n0
+      - PUBLIC_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICLbSID9Js5EGIXtF9ggp2SpYEScL7MYpaXuZwNLRiNj cjh@openchami
+    ports:
+      - 2222:2222
+
+  x0c0s2b1:
+    build:
+      context: ./ipmi_sim
+    networks:
+      - rcs
+    ports:
+      - 623:623/udp

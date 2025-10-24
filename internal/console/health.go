@@ -68,16 +68,14 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Health check: %s", stats)
 
 	// write the output
-		utils.SendResponseJSON(w, http.StatusOK, stats)
-	return
+	utils.SendResponseJSON(w, http.StatusOK, stats)
 }
 
 // Fill out the current status of a HealthResponse object
 func getCurrentHealth() HealthResponse {
 	var stats HealthResponse
-	stats.HardwareUpdateSec = fmt.Sprintf("%d", nodes.GetHardwareUpdatePeriodSec())
 	stats.LastHardwareUpdate = nodes.GetHardwareUpdateTime()
-	stats.NumberConsoles = fmt.Sprintf("%d", nodes.GetNodeCacheLen())
+	stats.NumberConsoles = fmt.Sprintf("%d", len(nodes.CurrentNodes()))
 	return stats
 }
 

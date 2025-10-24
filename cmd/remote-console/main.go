@@ -35,6 +35,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"strconv"
 
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
@@ -51,10 +52,16 @@ var (
 	// Debug logging (default is off)
 	debugLog = DebugLog{enabled: false}
 
-	// Most recent update from the HSM
-	hardwareUpdateTime string = "Unknown"
 
 	DebugOnly bool = false
+
+	inShutdown bool = false
+
+	// Pause between each lookup for new node information
+	 newNodeLookupSec int = 120
+
+	// Time to wait between checking for credential changes
+	monitorIntervalSecs int = 30
 )
 
 // Get environment var with default.
@@ -64,6 +71,130 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
+func isShuttingDown() bool {
+	return inShutdown
+}
+
+// Watch for node updates and signal conman and log rotation as needed
+func watchForNodesUpdates() {
+	for {
+		// look for new nodes once
+		if isShuttingDown != nil && isShuttingDown() {
+			log.Printf("Info: Exiting node watch loop due to shutdown")
+			return
+		}
+		changed := nodes.CheckForUpdates()
+
+		if changed {
+			log.Printf("Info: Node changes detected, signaling conman to restart")
+			conman.SignalConmanTERM()
+
+			// also update log rotation configuration
+			log.Printf("Info: Node changes detected, updating log rotation configuration")
+			logs.UpdateLogRotateConf()
+
+			// make sure we are aggregating any new console log files
+			log.Printf("Info: Node changes detected, updating log aggregation configuration")
+			logs.AggregateFiles()
+		}
+
+		// Wait for the correct polling interval
+		time.Sleep(time.Duration(newNodeLookupSec) * time.Second)
+	}
+}
+
+// Watch for credential updates and signal conman as needed
+func watchForCredUpdates() {
+	time.Sleep(time.Duration(monitorIntervalSecs) * time.Second)
+	for {
+		changed :=  creds.CheckForUpdates()
+
+		if changed {
+			log.Printf("Info: Credential changes detected, signaling conman to restart")
+			conman.SignalConmanTERM()
+		}
+
+		time.Sleep(time.Duration(monitorIntervalSecs) * time.Second)
+	}
+}
+
+
+func isTrue(str string) bool {
+	lStr := strings.ToLower(str)
+	if len(lStr) == 1 && (lStr[0] == 't' || lStr[0] == '1') {
+		return true
+	}
+	if len(lStr) > 1 && lStr == "true" {
+		return true
+	}
+	return false
+}
+
+// Log rotation setup and loop
+func logRotate() {
+	var logRotEnabled bool = true
+	var logRotCheckFreqSec = 600
+	var logRotConFileSize string = "5M"  // size of the console log file to rotate
+	var logRotConNumRotate int = 2       // number of console log backup copies to keep
+	var logRotAggFileSize string = "20M" // size of the aggregation file to rotate
+	var logRotAggNumRotate int = 1       // number of aggregation backup copies to keep
+
+		// Check for log rotation env vars
+	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
+		log.Printf("Found LOG_ROTATE_ENABLE: %s", val)
+		logRotEnabled = isTrue(val)
+	}
+	if val := os.Getenv("LOG_ROTATE_FILE_SIZE"); val != "" {
+		log.Printf("Found LOG_ROTATE_FILE_SIZE: %s", val)
+		logRotConFileSize = val
+	}
+	if val := os.Getenv("LOG_ROTATE_SEC_FREQ"); val != "" {
+		log.Printf("Found LOG_ROTATE_SEC_FREQ: %s", val)
+		envFreq, err := strconv.Atoi(val)
+		if err != nil {
+			log.Printf("Error converting log rotation frequency - expected an integer:%s", err)
+		} else {
+			logRotCheckFreqSec = envFreq
+		}
+	}
+	if val := os.Getenv("LOG_ROTATE_NUM_KEEP"); val != "" {
+		log.Printf("Found LOG_ROTATE_NUM_KEEP: %s", val)
+		envNum, err := strconv.Atoi(val)
+		if err != nil {
+			log.Printf("Error converting log rotation number - expected an integer:%s", err)
+		} else {
+			logRotConNumRotate = envNum
+		}
+	}
+
+	// log the log rotation parameters
+	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logRotEnabled, logRotCheckFreqSec)
+	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logRotConFileSize, logRotConNumRotate)
+	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logRotAggFileSize, logRotAggNumRotate)
+
+	// Init log rotation
+	logs.InitLogRotate(logRotEnabled, logRotCheckFreqSec, logRotConFileSize, logRotConNumRotate,  logRotAggFileSize, logRotAggNumRotate)
+
+	sleepSecs := time.Duration(300) * time.Second
+	if logRotCheckFreqSec > 0 {
+		sleepSecs = time.Duration(logRotCheckFreqSec) * time.Second
+	} else {
+		log.Printf("Log rotation frequency invalid, defaulting to 5 min. Input value:%d", logRotCheckFreqSec)
+	}
+
+	for {
+		restartConman := logs.LogRotate()
+		if restartConman {
+			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
+			conman.SignalConmanHUP()
+		}
+
+		time.Sleep(sleepSecs)
+	}
+} 
+
+
 
 func main() {
 	// Enable debug logging if requested.
@@ -79,9 +210,6 @@ func main() {
 	log.Printf("Starting zombie killer...")
 	go conman.WatchForZombies()
 
-	// first we set up the goroutine that polls the hsm
-	go nodes.WatchHardware()
-
 	// then we set up the goroutine that controls conman
 	_, err := utils.EnsureDirPresent("/var/log/conman", 0755)
 	if err != nil {
@@ -94,20 +222,16 @@ func main() {
 	// respinAggLog()
 
 	// Start log rotation with callback to signal conman
-	logs.LogRotate(conman.SignalConmanHUP)
+	go logRotate()
 
 	// spin a thread that watches for changes in console configuration
-	log.Printf("Starting hardware watch loop...")
-	go nodes.WatchForNodes(conman.SignalConmanTERM, logs.UpdateLogRotateConf)
+	go watchForNodesUpdates()
 
 	// start up the thread that runs conman
 	go conman.RunConman()
 
-	// start log aggregation
-	go logs.AggregateFiles(nodes.CurrentNodes)
-
 	// start the thread that will make sure that the conman creds are correct
-	go creds.CredMonitor(conman.SignalConmanTERM)
+	go watchForCredUpdates()
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs
@@ -130,6 +254,7 @@ func main() {
 
 	// Listen for syscall signals for process to interrupt/quit
 	go func() {
+		inShutdown = true
 		sig := <-sigs
 		log.Printf("Info: Detected signal to close service: %s", sig)
 
@@ -161,6 +286,7 @@ func main() {
 
 	// // Wait for server context to be stopped
 	<-serverCtx.Done()
+	log.Printf("Info: Shutdown complete.")
 }
 
 // DebugLog enables debug logging.

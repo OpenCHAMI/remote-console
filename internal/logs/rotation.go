@@ -33,7 +33,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"sync"
@@ -69,68 +68,35 @@ var logRotAggFileSize string = "20M" // size of the aggregation file to rotate
 var logRotAggNumRotate int = 1       // number of aggregation backup copies to keep
 
 // LogRotate initializes and starts log rotation
-func LogRotate(signalConmanHUP func()) {
-	
-	// Set up the 'backups' directory for logrotation to use
-	utils.EnsureDirPresent(logRotDir, 0755)
-
-	// Check for log rotation env vars
-	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
-		log.Printf("Found LOG_ROTATE_ENABLE: %s", val)
-		logRotEnabled = isTrue(val)
-	}
-	if val := os.Getenv("LOG_ROTATE_FILE_SIZE"); val != "" {
-		log.Printf("Found LOG_ROTATE_FILE_SIZE: %s", val)
-		logRotConFileSize = val
-	}
-	if val := os.Getenv("LOG_ROTATE_SEC_FREQ"); val != "" {
-		log.Printf("Found LOG_ROTATE_SEC_FREQ: %s", val)
-		envFreq, err := strconv.Atoi(val)
-		if err != nil {
-			log.Printf("Error converting log rotation frequency - expected an integer:%s", err)
-		} else {
-			logRotCheckFreqSec = envFreq
-		}
-	}
-	if val := os.Getenv("LOG_ROTATE_NUM_KEEP"); val != "" {
-		log.Printf("Found LOG_ROTATE_NUM_KEEP: %s", val)
-		envNum, err := strconv.Atoi(val)
-		if err != nil {
-			log.Printf("Error converting log rotation number - expected an integer:%s", err)
-		} else {
-			logRotConNumRotate = envNum
-		}
-	}
-
-	// log the log rotation parameters
-	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logRotEnabled, logRotCheckFreqSec)
-	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logRotConFileSize, logRotConNumRotate)
-	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logRotAggFileSize, logRotAggNumRotate)
-
-	// Create the log rotation configuration file
-	UpdateLogRotateConf()
-
-	// Start the log rotation thread
-	go doLogRotate(signalConmanHUP)
-}
-
-func isTrue(str string) bool {
-	lStr := strings.ToLower(str)
-	if len(lStr) == 1 && (lStr[0] == 't' || lStr[0] == '1') {
-		return true
-	}
-	if len(lStr) > 1 && lStr == "true" {
-		return true
-	}
-	return false
-}
-
-// UpdateLogRotateConf updates the log rotation configuration file
-func UpdateLogRotateConf() {
+func InitLogRotate(logRotEnabled bool, logRotCheckFreqSec int, logRotConFileSize string, logRotConNumRotate int,  logRotAggFileSize string, logRotAggNumRotate int) {
 	logMutex.Lock()
 	defer logMutex.Unlock()
 
-	log.Printf("LOG ROTATE: Opening conman log rotation configuration file for output: %s", logRotConfFile)
+
+	logRotEnabled = logRotEnabled
+	logRotCheckFreqSec = logRotCheckFreqSec
+	logRotConFileSize = logRotConFileSize
+	logRotConNumRotate = logRotConNumRotate
+	logRotAggFileSize = logRotAggFileSize
+	logRotAggNumRotate = logRotAggNumRotate
+
+	// Set up the 'backups' directory for logrotation to use
+	utils.EnsureDirPresent(logRotDir, 0755)
+
+	// Create the log rotation configuration file
+	UpdateLogRotateConf()
+}
+
+
+// UpdateLogRotateConf updates the log rotation configuration file
+func UpdateLogRotateConf() {
+	log.Printf("before log mutex")
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	log.Printf("LOG ROTATE: after")
+
+	// Open the file for writing
+	log.Printf("LOG ROTATE: Opening conman log rotation configuration fillle for output: %s", logRotConfFile)
 	lrf, err := os.Create(logRotConfFile)
 	if err != nil {
 		log.Printf("Unable to open config file to write: %s", err)
@@ -138,6 +104,9 @@ func UpdateLogRotateConf() {
 	}
 	defer lrf.Close()
 
+	log.Printf("LOG ROTATE: Writing log rotation configuration file")
+
+	// Write out the contents of the file
 	fmt.Fprintln(lrf, "# Auto-generated conman log rotation configuration file.")
 
 	// Add the aggregation file
@@ -150,15 +119,19 @@ func UpdateLogRotateConf() {
 		}
 	}
 
+	log.Printf("LOG ROTATE: CurrentNodes")
 	// Add all nodes
 	consoleLogBackupDir := "/var/log/conman.old"
 	for _, cni := range nodes.CurrentNodes() {
+		log.Printf("cni")
 		xname := cni.NodeName
 		fn := fmt.Sprintf("/var/log/conman/console.%s", xname)
 		writeConfigEntry(lrf, fn, consoleLogBackupDir, logRotConNumRotate, logRotConFileSize)
 	}
 
 	fmt.Fprintln(lrf, "")
+
+	log.Printf("LOG ROTATE: Completed writing log rotation configuration file")
 }
 
 func writeConfigEntry(lrf *os.File, fileName string, oldDir string, numRotate int, fileSize string) {
@@ -263,28 +236,21 @@ func readLogRotTimestamps(fileStamp map[string]time.Time) (conChanged, aggChange
 	return conChanged, aggChanged
 }
 
-func doLogRotate(signalConmanHUP func()) {
-	time.Sleep(120 * time.Second)
-
-	sleepSecs := time.Duration(300) * time.Second
-	if logRotCheckFreqSec > 0 {
-		sleepSecs = time.Duration(logRotCheckFreqSec) * time.Second
-	} else {
-		log.Printf("Log rotation frequency invalid, defaulting to 5 min. Input value:%d", logRotCheckFreqSec)
-	}
-
+// LogRotate performs a log rotation check and rotation if needed
+func LogRotate() bool{
+	changed := false
 	fileStamp := make(map[string]time.Time)
 	readLogRotTimestamps(fileStamp)
 
-	for {
-		if logRotEnabled {
-			rotateLogsOnce(fileStamp, signalConmanHUP)
-		}
-		time.Sleep(sleepSecs)
+	if logRotEnabled {
+		changed = rotateLogsOnce(fileStamp)
 	}
+	
+	return changed
 }
 
-func rotateLogsOnce(fileStamp map[string]time.Time, signalConmanHUP func()) {
+func rotateLogsOnce(fileStamp map[string]time.Time) bool {
+	conChanged := false
 	log.Print("LOG ROTATE: Starting logrotate")
 	cmd := exec.Command("logrotate", "-s", logRotStateFile, logRotConfFile)
 	exitCode := -1
@@ -302,19 +268,12 @@ func rotateLogsOnce(fileStamp map[string]time.Time, signalConmanHUP func()) {
 	if conChanged, aggChanged := readLogRotTimestamps(fileStamp); conChanged || aggChanged {
 		time.Sleep(5 * time.Second)
 
-		if conChanged {
-			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
-			if signalConmanHUP != nil {
-				signalConmanHUP()
-			} else {
-				log.Print("Warning: signalConmanHUP not provided, cannot signal conman")
-			}
-		}
-
 		if aggChanged {
 			RespinAggLog()
 		}
 	} else {
 		log.Print("LOG ROTATE: No log files changed with logrotate")
 	}
+
+	return conChanged
 }

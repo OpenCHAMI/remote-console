@@ -49,7 +49,7 @@ func drainAndCloseRequestBody(req *http.Request) {
 
 func validateNode(id string) bool {
 	// make sure this is a valid node
-	if !nodes.NodeCacheHas(id) {
+	if !nodes.IsCurrentNode(id) {
 		log.Printf("%s is not a valid node.", id)
 		return false
 	}

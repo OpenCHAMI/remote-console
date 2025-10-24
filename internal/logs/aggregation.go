@@ -37,7 +37,7 @@ import (
 
 	"github.com/hpcloud/tail"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 // Global vars
@@ -52,8 +52,8 @@ var conAggLogFile string = ""
 // map to cancel threads tailing log files
 var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
 
-// AggregateFile sets up tailing a log file to add to the aggregation file
-func AggregateFile(xname string) bool {
+// aggregateFile sets up tailing a log file to add to the aggregation file
+func aggregateFile(xname string) bool {
 	newFile := false
 	if _, ok := tailThreads[xname]; !ok {
 		// indicate we are starting to watch this one
@@ -157,15 +157,11 @@ func RespinAggLog() {
 	conAggLogger.Print("Starting aggregation log")
 }
 
-func AggregateFiles(currentNodesFunc func() map[string]*types.NodeConsoleInfo) {
-	nodes := currentNodesFunc()
-	for {
 
-		for xname := range nodes {
-			// make sure the node is being aggregated - no-op if already being done
-			AggregateFile(xname)
-		}
-
-		time.Sleep(10 * time.Second)
+func AggregateFiles() {
+	nodes := nodes.CurrentNodes()
+	for xname := range nodes {
+		// make sure the node is being aggregated - no-op if already being done
+		aggregateFile(xname)
 	}
 }

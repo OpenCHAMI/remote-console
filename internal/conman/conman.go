@@ -17,7 +17,6 @@ import (
 	"bufio"
 	"sync"
 
-	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 )
@@ -25,22 +24,8 @@ import (
 var conmanMutex = &sync.Mutex{}
 var command *exec.Cmd = nil
 
-const baseConfFile string = "/home/cjh/work/source/remote-console/conman_base.conf"
-const confFile string = "./conman.conf"
-
-// ConmanDeps defines the dependencies required by the conman package.
-// We keep function dependencies here to avoid import cycles.
-type ConmanDeps struct {
-	GetPasswordsWithRetries func(xnames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials
-	SetPreviousPasswords    func(map[string]compcreds.CompCredentials)
-	CreateTestLogFile       func(xname string, respin bool) // for debug respin
-}
-
-var globalDeps *ConmanDeps
-
-func SetConmanDeps(deps *ConmanDeps) {
-	globalDeps = deps
-}
+const baseConfFile string = "/home/cjh/work/source/remote-console/scripts/conman.conf"
+const confFile string = "/tmp/conman.conf"
 
 // RunConman starts the conman management loop with injected dependencies.
 func RunConman() {
@@ -78,6 +63,8 @@ func updateConfigFile(forceUpdate bool) bool{
 	}
 	defer bf.Close()
 
+	log.Printf("forceUpdate=%v, willUpdateConfig=%v", forceUpdate, willUpdateConfig(bf))
+
 	if !forceUpdate && !willUpdateConfig(bf) {
 		log.Print("Skipping update due to base config file flag")
 		return false
@@ -95,15 +82,18 @@ func updateConfigFile(forceUpdate bool) bool{
 		log.Printf("Unable to copy base file into config: %s", err)
 	}
 
+	log.Printf("Getting current nodes to populate conman configuration")
+
 	currentNodes := nodes.CurrentNodes()
+
+
+	log.Printf("Current nodes length: %d", len(currentNodes))
 	var ipmiXNames []string
 	for _, nci := range currentNodes {
 		ipmiXNames = append(ipmiXNames, nci.BmcName)
 	}
 
-	// TODO this should be enscapsulated in creds
 	passwords := creds.GetPasswordsWithRetries(ipmiXNames, 15, 10)
-	creds.SetPreviousPasswords(passwords)
 
 	for _, nci := range currentNodes {
 		if nci.IsIPMI() {
@@ -127,7 +117,7 @@ func updateConfigFile(forceUpdate bool) bool{
 			}
 			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-console %s %s REDACTED\"\n",
 				nci.NodeName, nci.BmcFqdn, creds.Username)
-			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-pwd-console %s %s %s\"\n",
+			output := fmt.Sprintf("console name=\"%s\" dev=\"/home/cjh/work/source/remote-console/scripts/ssh-pwd-console %s %s %s\"\n",
 				nci.NodeName, nci.BmcFqdn, creds.Username, creds.Password)
 			if _, err = cf.WriteString(output); err != nil {
 				log.Panic(err)
@@ -135,7 +125,8 @@ func updateConfigFile(forceUpdate bool) bool{
 		} else if nci.IsKeySSH() {
 			log.Printf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
 				nci.NodeName, nci.NodeName)
-			output := fmt.Sprintf("console name=\"%s\" dev=\"/usr/bin/ssh-key-console %s\"\n",
+			// TODO revert these paths
+			output := fmt.Sprintf("console name=\"%s\" dev=\"/home/cjh/work/source/remote-console/scripts/ssh-key-console %s\"\n",
 				nci.NodeName, nci.NodeName)
 			if _, err = cf.WriteString(output); err != nil {
 				log.Panic(err)
@@ -186,14 +177,16 @@ func SignalConmanHUP() {
 		command.Process.Signal(syscall.SIGHUP)
 	} else {
 		log.Print("Warning: Attempting to signal conman process when nil.")
-		if globalDeps != nil && nodes.DebugOnly && nodes.CurrentNodes != nil && globalDeps.CreateTestLogFile != nil {
-			log.Printf("Respinning current log test files...")
-			for _, nci := range nodes.CurrentNodes() {
-				if nci.IsKeySSH() || nci.IsIPMI() {
-					go globalDeps.CreateTestLogFile(nci.NodeName, true)
-				}
-			}
-		}
+
+		// TODO fix this up
+		// if globalDeps != nil && nodes.DebugOnly && nodes.CurrentNodes != nil && globalDeps.CreateTestLogFile != nil {
+		// 	log.Printf("Respinning current log test files...")
+		// 	for _, nci := range nodes.CurrentNodes() {
+		// 		if nci.IsKeySSH() || nci.IsIPMI() {
+		// 			go globalDeps.CreateTestLogFile(nci.NodeName, true)
+		// 		}
+		// 	}
+		// }
 	}
 }
 

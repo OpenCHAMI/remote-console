@@ -34,35 +34,34 @@ import (
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	sstorage "github.com/Cray-HPE/hms-securestorage"
 )
-
+// TODO can these be private?
+// Also where should the point to!
 const SshConsoleKeyPath string = "/var/log/console/conman.key"
 const SshConsoleKeyPubCertPath string = "/var/log/console/conman.key-cert.pub"
 
 var PreviousPrivateKeyHash []byte = nil
-var PreviousPublicCertHash []byte = nil
+var PreviousCertHash []byte = nil
 
 // TODO temp for refactor
-var DebugOnly bool = true
+var DebugOnly bool = false
 
 // Internal state for password tracking
 var previousPasswords map[string]compcreds.CompCredentials = nil
 
-// SetPreviousPasswords updates the stored password credentials
-func SetPreviousPasswords(passwords map[string]compcreds.CompCredentials) {
-	previousPasswords = passwords
-}
-
-// GetPreviousPasswords returns the stored password credentials
-func GetPreviousPasswords() map[string]compcreds.CompCredentials {
-	return previousPasswords
+type sshKeys struct {
+	PrivateKey     string `json:"privateKey"`
+	Certificate *string `json:"certificate"`
 }
 
 // Look up the creds for the input endpoints with retries
+// TODO: I don't think we need this retry logic here any more?
 func GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
 	var passwords map[string]compcreds.CompCredentials = nil
 	for numTries := 0; numTries < maxTries; numTries++ {
 		log.Printf("Get passwords with retry: %d", numTries)
 		passwords = GetPasswords(bmcXNames)
+		log.Printf("Retrieved %v", passwords)
+
 		foundAll := true
 		for _, nn := range bmcXNames {
 			_, ok := passwords[nn]
@@ -94,15 +93,19 @@ func GetPasswords(bmcXNames []string) map[string]compcreds.CompCredentials {
 	}
 
 	log.Print("Gathering creds from vault")
-	ss, err := sstorage.NewVaultAdapter("secret")
+	ss, err := sstorage.NewVaultAdapter("")
 	if err != nil {
 		log.Panicf("Error: %#v\n", err)
 	}
+
 	ccs := compcreds.NewCompCredStore("hms-creds", ss)
 	ccreds, err := ccs.GetCompCreds(bmcXNames)
 	if err != nil {
 		log.Panicf("Error: %#v\n", err)
 	}
+
+	previousPasswords = ccreds
+
 	return ccreds
 }
 
@@ -114,6 +117,8 @@ func HashString(s string) ([]byte, error) {
 	return hasher.Sum(nil), nil
 }
 
+
+
 func EnsureConsoleKeysPresent() bool {
 	retVal := false
 	// TODO: DebugOnly should be passed in or imported from config
@@ -124,35 +129,38 @@ func EnsureConsoleKeysPresent() bool {
 
 	vaultBasePath := os.Getenv("VAULT_BASE_PATH")
 	if len(vaultBasePath) == 0 {
-		log.Printf("Error: VAULT_BASE_PATH environment variable is not set, defaulting to 'secret'")
+		log.Printf("Warning: VAULT_BASE_PATH environment variable is not set, defaulting to 'secret'")
 		vaultBasePath = "secret"
 	}
 	vaultRole := os.Getenv("VAULT_ROLE")
 	if len(vaultRole) == 0 {
-		log.Printf("Error: VAULT_ROLE environment variable is not set, defaulting to ''")
+		log.Printf("Warning: VAULT_ROLE environment variable is not set, defaulting to ''")
 		vaultRole = ""
 	}
-	consolePrivateKeyName := os.Getenv("CONSOLE_PRIVATE_KEY_NAME")
+	consolePrivateKeyName := os.Getenv("CONSOLE_KEYS_NAME")
 	if len(consolePrivateKeyName) == 0 {
-		log.Printf("Error: CONSOLE_PRIVATE_KEY_NAME environment variable is not set, defaulting to 'bmc-console-key'")
-		consolePrivateKeyName = "bmc-console-key"
+		log.Printf("Warning: CONSOLE_KEYS_NAME environment variable is not set, defaulting to 'bmc-console-keys'")
+		consolePrivateKeyName = "bmc-console-keys"
 	}
 	ss, err := sstorage.NewVaultAdapterAs(vaultBasePath, vaultRole)
 	if err != nil {
 		log.Panicf("Error: Unable to create secure storage adapter: %#v\n", err)
 	}
-	var consolePrivateKey string
-	err = ss.Lookup(consolePrivateKeyName, &consolePrivateKey)
+	var consoleKeys sshKeys
+	err = ss.Lookup(consolePrivateKeyName, &consoleKeys)
 	if err != nil {
 		log.Panicf("Error: Unable to lookup private key: %#v\n", err)
 	}
-	newHash, err := HashString(consolePrivateKey)
+
+	log.Printf("consolePrivateKey: %v", consoleKeys.PrivateKey)
+
+	newHash, err := HashString(consoleKeys.PrivateKey)
 	if err != nil {
 		log.Printf("Error: Failed to hash the private ssh key received from Vault. Err: %s", err)
 	} else if PreviousPrivateKeyHash == nil || !(bytes.Equal(newHash, PreviousPrivateKeyHash)) {
 		retVal = true
 		PreviousPrivateKeyHash = newHash
-		err = os.WriteFile(SshConsoleKeyPath, []byte(consolePrivateKey), 0600)
+		err = os.WriteFile(SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
 		if err != nil {
 			log.Printf("Error: Failed to write our the private ssh key received from Vault. Err: %s", err)
 			return retVal
@@ -163,28 +171,26 @@ func EnsureConsoleKeysPresent() bool {
 		log.Printf("Console ssh key file already exists")
 		return retVal
 	}
-	var consolePublicCert string
-	err = ss.Lookup(consolePrivateKeyName+"-cert", &consolePublicCert)
-	if err != nil {
-		log.Printf("Warning: Unable to lookup public cert key: %#v\n", err)
-		return retVal
-	}
-	newHash, err = HashString(consolePublicCert)
-	if err != nil {
-		log.Printf("Error: Failed to hash the public ssh cert received from Vault. Err: %s", err)
-	} else if PreviousPublicCertHash == nil || !(bytes.Equal(newHash, PreviousPublicCertHash)) {
-		retVal = true
-		PreviousPublicCertHash = newHash
-		err = os.WriteFile(SshConsoleKeyPubCertPath, []byte(consolePublicCert), 0644)
+
+	if consoleKeys.Certificate != nil {
+		newHash, err = HashString(*consoleKeys.Certificate)
 		if err != nil {
-			log.Printf("Error: Failed to write our the public ssh cert received from Vault. Err: %s", err)
+			log.Printf("Error: Failed to hash the public ssh cert received from Vault. Err: %s", err)
+		} else if PreviousCertHash == nil || !(bytes.Equal(newHash, PreviousCertHash)) {
+			retVal = true
+			PreviousCertHash = newHash
+			err = os.WriteFile(SshConsoleKeyPubCertPath, []byte(*consoleKeys.Certificate), 0644)
+			if err != nil {
+				log.Printf("Error: Failed to write our the public ssh cert received from Vault. Err: %s", err)
+				return retVal
+			}
+			log.Printf("Console ssh cert file created")
+			return retVal
+		} else {
+			log.Printf("Console ssh cert file already exists")
 			return retVal
 		}
-		log.Printf("Console ssh cert file created")
-		return retVal
-	} else {
-		log.Printf("Console ssh cert file already exists")
-		return retVal
 	}
+
 	return retVal
 }

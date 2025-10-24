@@ -46,8 +46,8 @@ var (
 	DebugOnly = false
 )
 
-// Pause between each lookup for new node information
-var newNodeLookupSec int = 30
+
+var hardwareUpdateTime string = "Unknown"
 
 // CurrNodesMutex protects access to CurrentNodes
 var currNodesMutex = &sync.Mutex{}
@@ -218,8 +218,11 @@ func GetCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
 		return nil
 	}
 
+	log.Printf("Fetched %d redfish endpoints and %d state components", len(rfEndpoints), len(stComps))
+
 	// get the paradise nodes
 	// NOTE: this returns a pseudo-set to speed up lookups
+	// TODO clean up paradise node handling
 	paradiseNodes, err := getParadiseNodes()
 	if err != nil {
 		// log the error but don't die - most systems will not have Paradise nodes anyway
@@ -262,92 +265,85 @@ func GetCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
 		}
 	}
 
+	log.Printf("Completed getting current nodes on the system. Found %d nodes", len(nodes))
+
 	return nodes
 }
 
-func doGetNewNodes(signalConmanTERM, updateLogRotateConf func()) {
+func updateNodes(nodes []types.NodeConsoleInfo) bool {
+	changed := false
+	// compare with current nodes
+
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+
+	new_nodes := make(map[string]*types.NodeConsoleInfo)
+	names_map := make(map[string]bool)
+	for name, _ := range currentNodes {
+		names_map[name] = true
+	}
+
+	for _, nci := range nodes {
+		//accumulate data for missing nodes to delete
+		delete(names_map, nci.NodeName)
+
+		curr_nci, present := currentNodes[nci.NodeName]
+		if !present {
+			//
+			new_nodes[nci.NodeName] = &nci
+		} else {
+			if *curr_nci != nci {
+				// something about the info has changed so we
+				// probably need to update.  we could refine this,
+				// but I imagine it almost never happens
+				changed = true
+				currentNodes[nci.NodeName] = &nci
+			}
+		}
+	}
+
+	if len(names_map) != 0 {
+		changed = true
+		for name, _ := range names_map {
+			delete(currentNodes, name)
+		}
+	}
+
+	if len(new_nodes) != 0 {
+		changed = true
+		for name, nci := range new_nodes {
+			currentNodes[name] = nci
+		}
+	}
+
+	return changed
+}
+
+
+func CheckForUpdates() bool{
+	hardwareUpdateTime = time.Now().Format(time.RFC3339)
+
+	log.Printf("Getting current nodes from HSM")
 	// keep track of if we need to redo the configuration
 	changed := false
 
-	// Check if we need to gather more nodes - don't take more
-	//  if the service is shutting down
-	if !inShutdown {
+	fetched_nodes := GetCurrentNodesFromHSM()
 
-		fetched_nodes := GetCurrentNodesFromHSM()
+	log.Printf("Fetched %d nodes from HSM", len(fetched_nodes))
 
-		currNodesMutex.Lock()
-		defer currNodesMutex.Unlock()
+	changed = updateNodes(fetched_nodes)
 
-		new_nodes := make(map[string]*types.NodeConsoleInfo)
-		names_map := make(map[string]bool)
-		for name, _ := range currentNodes {
-			names_map[name] = true
-		}
+	log.Printf("Completed getting current nodes from HSM")
 
-		for _, nci := range fetched_nodes {
-			//accumulate data for missing nodes to delete
-			delete(names_map, nci.NodeName)
-
-			curr_nci, present := currentNodes[nci.NodeName]
-			if !present {
-				//
-				new_nodes[nci.NodeName] = &nci
-			} else {
-				if *curr_nci != nci {
-					// something about the info has changed so we
-					// probably need to update.  we could refine this,
-					// but I imagine it almost never happens
-					changed = true
-					currentNodes[nci.NodeName] = &nci
-				}
-			}
-		}
-
-		if len(names_map) != 0 {
-			changed = true
-			for name, _ := range names_map {
-				delete(currentNodes, name)
-			}
-		}
-
-		if len(new_nodes) != 0 {
-			changed = true
-			for name, nci := range new_nodes {
-				currentNodes[name] = nci
-			}
-		}
-	}
-
-	// Restart the conman process if needed
-	if changed {
-		// term conman, which will trigger a regeneration of the
-		// config file before it restarts
-		if signalConmanTERM != nil {
-			signalConmanTERM()
-		}
-
-		// rebuild the log rotation configuration file
-		if updateLogRotateConf != nil {
-			updateLogRotateConf()
-		}
-	}
-
-}
-
-// Primary loop to watch for updates
-func WatchForNodes(signalConmanTERM, updateLogRotateConf func()) {
-	// create a loop to execute the conmand command
-	for {
-		// look for new nodes once
-		doGetNewNodes(signalConmanTERM, updateLogRotateConf)
-
-		// Wait for the correct polling interval
-		time.Sleep(time.Duration(newNodeLookupSec) * time.Second)
-	}
+	return changed
 }
 
 func CurrentNodes() map[string]*types.NodeConsoleInfo {
+	log.Println("Trying to lock")
 	currNodesMutex.Lock()
+	log.Println("Locked")
+	
+
 	defer currNodesMutex.Unlock()
 
 	// create a copy of the current nodes to return
@@ -356,6 +352,7 @@ func CurrentNodes() map[string]*types.NodeConsoleInfo {
 		nodesCopy[k] = v
 	}
 
+	fmt.Println("CurrentNodes: returning copy of current nodes")	
 	return nodesCopy
 }
 
@@ -379,4 +376,17 @@ func releaseNode(xname string, stopTailing func(string)) bool {
 	}
 
 	return found
+}
+
+func IsCurrentNode(nodeID string) bool {
+	log.Printf("ins")
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+
+	_, ok := currentNodes[nodeID]
+	return ok
+}
+
+func GetHardwareUpdateTime() string {
+	return hardwareUpdateTime
 }
