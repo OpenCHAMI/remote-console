@@ -51,7 +51,7 @@ func DefaultConmanConfig() ConmanConfig {
 }
 
 
-func ConfigureConman(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords  map[string]compcredentials.CompCredentials) bool {
+func ConfigureConman(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords  map[string]compcredentials.CompCredentials) (bool, error) {
 	conmanMutex.Lock()
 	defer conmanMutex.Unlock()
 
@@ -81,34 +81,32 @@ func generateBaseConfig(config ConmanConfig) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords  map[string]compcredentials.CompCredentials, forceUpdate bool) bool{
+func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords  map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
 	log.Print("Updating the configuration file")
 	
 	bs, err := generateBaseConfig(config)
 	if err != nil {
-		log.Panicf("Unable to template base config file: %s", err)
+		return false, fmt.Errorf("Unable to template base config file: %v", err)
 	}
 
 	if !forceUpdate && !willUpdateConfig(bs) {
 		log.Print("Skipping update due to base config file flag")
-		return false
+		return false, nil
 	}
 
 	log.Printf("Opening conman configuration file for output: %s", config.ConfFilePath)
 	cf, err := os.OpenFile(config.ConfFilePath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		log.Panicf("Unable to open config file to write: %s", err)
+		return false , fmt.Errorf("Unable to open config file to write: %v", err)
 	}
 	defer cf.Close()
 
 	_, err = cf.Write(bs)
 	if err != nil {
-		log.Printf("Unable to write base config into file: %s", err)
+		return false, fmt.Errorf("Unable to write base config into file: %v", err)
 	}
 
 	log.Printf("Getting current nodes to populate conman configuration")
-
-	log.Printf("Current nodes length: %d", len(nodes))
 
 	consoles := make([]string, 0, len(nodes))
 
@@ -123,9 +121,6 @@ func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleIn
 			output := fmt.Sprintf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:%s,W:solpayloadsize\"\n",
 				nci.NodeName, nci.BmcFqdn, creds.Username, creds.Password)
 			consoles = append(consoles, output)
-			// if _, err = cf.WriteString(output); err != nil {
-			// 	log.Panic(err)
-			// }
 		} else if nci.IsPassSSH() {
 			creds, ok := passwords[nci.BmcName]
 			if !ok {
@@ -136,19 +131,12 @@ func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleIn
 			output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %s %s\"\n",
 				nci.NodeName, config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username, creds.Password)
 			consoles = append(consoles, output)
-			// if _, err = cf.WriteString(output); err != nil {
-			// 	log.Panic(err)
-			// }
 		} else if nci.IsKeySSH() {
 			log.Printf("console name=\"%s\" dev=\"%s/ssh-key-console %s\"\n",
 				nci.NodeName, config.ConsoleScriptsPath, nci.NodeName)
-			// TODO revert these paths
 			output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-key-console %s\"\n",
 				nci.NodeName, config.ConsoleScriptsPath, nci.NodeName)
 			consoles = append(consoles, output)
-			// if _, err = cf.WriteString(output); err != nil {
-			// 	log.Panic(err)
-			// }
 		}
 	}
 
@@ -156,11 +144,11 @@ func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleIn
 	sort.Strings(consoles)
 	for _, output := range consoles {
 		if _, err = cf.WriteString(output); err != nil {
-			log.Panic(err)
+			return false, fmt.Errorf("Unable to write console entry into file: %v", err)
 		}
 	}
 
-	return len(nodes) > 0
+	return len(nodes) > 0, nil
 }
 
 func willUpdateConfig(baseConfig []byte) bool {
@@ -225,25 +213,25 @@ func logPipeOutput(readPipe *io.ReadCloser, desc string) {
 	}
 }
 
-func ExecuteConman(config ConmanConfig) {
+func ExecuteConman(config ConmanConfig) error {
 	log.Print("Starting a new instance of conmand")
 	if command != nil {
-		log.Print("ERROR: command not nil on entry to executeConman!!")
+		return fmt.Errorf("command not nil on entry to executeConman!!")
 	}
 	command = exec.Command("conmand", "-F", "-v", "-c", config.ConfFilePath)
 	cmdStdErr, err := command.StderrPipe()
 	if err != nil {
-		log.Panicf("Unable to connect to conmand stderr pipe: %s", err)
+		return fmt.Errorf("Unable to connect to conmand stderr pipe: %s", err)
 	}
 	cmdStdOut, err := command.StdoutPipe()
 	if err != nil {
-		log.Panicf("Unable to connect to conmand stdout pipe: %s", err)
+		return fmt.Errorf("Unable to connect to conmand stdout pipe: %s", err)
 	}
 	go logPipeOutput(&cmdStdErr, "stderr")
 	go logPipeOutput(&cmdStdOut, "stdout")
 	log.Print("Starting conmand process")
 	if err = command.Start(); err != nil {
-		log.Panicf("Unable to start the command: %s", err)
+		return fmt.Errorf("Unable to start the command: %s", err)
 	}
 	if err = command.Wait(); err != nil {
 		log.Printf("Error from command wait: %s", err)
@@ -251,6 +239,8 @@ func ExecuteConman(config ConmanConfig) {
 	}
 	command = nil
 	log.Print("Conmand process has exited")
+
+	return nil
 }
 
 // DEBUG Function to create and add to a fake log file

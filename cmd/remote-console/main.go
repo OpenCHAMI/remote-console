@@ -94,7 +94,7 @@ func watchForNodesUpdates() {
 			// also update log rotation configuration
 			log.Printf("Info: Node changes detected, updating log rotation configuration")
 			config := logConfig()
-			logs.UpdateLogRotateConf(config)
+			logs.UpdateLogRotateConf(config, nodes)
 
 			// make sure we are aggregating any new console log files
 			log.Printf("Info: Node changes detected, updating log aggregation configuration")
@@ -180,7 +180,10 @@ func runConman()  {
 		}
 
 		passwords := creds.GetPasswordsWithRetries(credsConfig, requirePasswords, 15, 10)
-		hasNodes := conman.ConfigureConman(conmanConfig, nodes, passwords)
+		hasNodes, err := conman.ConfigureConman(conmanConfig, nodes, passwords)
+		if err != nil {
+			log.Panicf("Error configuring conman: %s", err)
+		}
 
 		if conmanConfig.DebugOnly {
 			time.Sleep(25 * time.Second)
@@ -189,7 +192,10 @@ func runConman()  {
 			log.Printf("No console nodes found - trying again")
 			time.Sleep(30 * time.Second)
 		} else {
-			conman.ExecuteConman(conmanConfig)
+			err := conman.ExecuteConman(conmanConfig)
+			if err != nil {
+				log.Panicf("Error executing conman: %s", err)
+			}
 		}
 		time.Sleep(10 * time.Second)
 	}

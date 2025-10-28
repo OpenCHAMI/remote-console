@@ -90,7 +90,8 @@ func TestConfigureConman(t *testing.T) {
 	}
 
 	// First call should create the config file
-	updated := ConfigureConman(config, nodes, passwords)
+	updated, err := ConfigureConman(config, nodes, passwords)
+	require.NoError(t, err)
 	require.True(t, updated)
 	
 	// Read the generated config file
