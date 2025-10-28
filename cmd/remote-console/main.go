@@ -36,9 +36,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
-	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
@@ -50,7 +50,6 @@ var (
 
 	// Debug logging (default is off)
 	debugLog = DebugLog{enabled: false}
-
 
 	DebugOnly bool = false
 
@@ -106,13 +105,11 @@ func watchForNodesUpdates() {
 	}
 }
 
-
-
 // Watch for credential updates and signal conman as needed
 func watchForCredUpdates(config creds.CredsConfig) {
 	time.Sleep(time.Duration(monitorIntervalSecs) * time.Second)
 	for {
-		changed, err :=  creds.CheckForUpdates(config)
+		changed, err := creds.CheckForUpdates(config)
 		if err != nil {
 			log.Printf("Error checking for credential updates: %s", err)
 		}
@@ -125,7 +122,6 @@ func watchForCredUpdates(config creds.CredsConfig) {
 		time.Sleep(time.Duration(monitorIntervalSecs) * time.Second)
 	}
 }
-
 
 // Log rotation setup and loop
 func logRotate() {
@@ -159,9 +155,9 @@ func logRotate() {
 
 		time.Sleep(sleepSecs)
 	}
-} 
+}
 
-func runConman()  {
+func runConman() {
 	conmanConfig := conmanConfig()
 
 	credsConfig, err := credsConfig()
@@ -174,7 +170,7 @@ func runConman()  {
 
 		var requirePasswords []string
 		for _, nci := range nodes {
-			if nci.IsIPMI() || nci.IsPassSSH()  {
+			if nci.IsIPMI() || nci.IsPassSSH() {
 				requirePasswords = append(requirePasswords, nci.BmcName)
 			}
 		}

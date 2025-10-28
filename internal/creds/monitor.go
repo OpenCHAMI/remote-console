@@ -12,7 +12,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
-type SignalConmanTERM func ()
+type SignalConmanTERM func()
 
 // Time to wait between checking for credential changes
 var MonitorIntervalSecs int = 30
@@ -38,18 +38,17 @@ func CheckForUpdates(config CredsConfig) (bool, error) {
 		return false, err
 	}
 
-	restartConman =  sshKeyAuth && changed 
+	restartConman = sshKeyAuth && changed
 
 	changed, err = checkIfPasswordsChanged(config, xnames)
 	if err != nil {
 		return false, err
 	}
 
-	restartConman =  len(xnames) > 0 &&  changed || restartConman
+	restartConman = len(xnames) > 0 && changed || restartConman
 
 	return restartConman, nil
 }
-
 
 func checkIfPasswordsChanged(config CredsConfig, xnames []string) (bool, error) {
 	if previousPasswords == nil {

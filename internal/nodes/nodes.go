@@ -27,17 +27,16 @@
 package nodes
 
 import (
-		"encoding/json"
-		"fmt"
-		"log"
-		"strings"
-		"sync"
-		"time"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
+	"sync"
+	"time"
 
-		"github.com/OpenCHAMI/remote-console/internal/types"
-		"github.com/OpenCHAMI/remote-console/internal/utils"
+	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
-
 
 var hardwareUpdateTime string = "Unknown"
 
@@ -92,7 +91,7 @@ func getRedfishEndpoints(smdURL string) ([]redfishEndpoint, error) {
 
 	// Query hsm to get the redfish endpoints
 	URL := smdURL + "hsm/v2/Inventory/RedfishEndpoints"
-		data, _, err := utils.GetURL(URL, nil)
+	data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get redfish endpoints from hsm:%s", err)
 		return nil, err
@@ -118,7 +117,7 @@ func getStateComponents(smdURL string) ([]stateComponent, error) {
 
 	// get the state components from hsm
 	URL := smdURL + "hsm/v2/State/Components"
-		data, _, err := utils.GetURL(URL, nil)
+	data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get state component information from hsm:%s", err)
 		return nil, err
@@ -165,7 +164,7 @@ func getParadiseNodes(smdURL string) (map[string]struct{}, error) {
 	// NOTE: this only pulls the Foxconn BMCs from the inventory so there is a bit of
 	//  server side filtering going on
 	URL := smdURL + "hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
-		data, _, err := utils.GetURL(URL, nil)
+	data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get hardware inventory from hsm:%s", err)
 		return nil, err
@@ -311,8 +310,7 @@ func updateNodes(nodes []types.NodeConsoleInfo) bool {
 	return changed
 }
 
-
-func CheckForUpdates(smdURL string) bool{
+func CheckForUpdates(smdURL string) bool {
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 
 	log.Printf("Getting current nodes from HSM")
@@ -334,7 +332,6 @@ func CurrentNodes() map[string]*types.NodeConsoleInfo {
 	log.Println("Trying to lock")
 	currNodesMutex.Lock()
 	log.Println("Locked")
-	
 
 	defer currNodesMutex.Unlock()
 
@@ -344,7 +341,7 @@ func CurrentNodes() map[string]*types.NodeConsoleInfo {
 		nodesCopy[k] = v
 	}
 
-	fmt.Println("CurrentNodes: returning copy of current nodes")	
+	fmt.Println("CurrentNodes: returning copy of current nodes")
 	return nodesCopy
 }
 

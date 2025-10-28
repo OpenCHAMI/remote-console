@@ -8,11 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Cray-HPE/hms-securestorage"
-)	
+)
 
 func TestCheckIfPasswordsChanged(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	// Setup a local secure storage file
 	localStoreFilePath := filepath.Join(tempDir, "secure_store")
 	localStoreKey, err := securestorage.GenerateMasterKey()
@@ -20,7 +20,6 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	ss, err := securestorage.NewLocalSecretStore(localStoreKey, localStoreFilePath, true)
 	require.NoError(t, err)
 
-	
 	testPasswords := map[string]string{
 		"x0c0s1b0": "password1",
 		"x0c0s1b1": "password2",
@@ -32,7 +31,7 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 			"Username": "admin",
 			"Password": password,
 			"Xname":    node,
-			"URL":   "https://" + node + "/redfish/v1/Managers/BMC",
+			"URL":      "https://" + node + "/redfish/v1/Managers/BMC",
 		}
 		fmt.Printf("hms-creds/%s\n", node)
 		err = ss.Store(fmt.Sprintf("hms-creds/%s", node), value)
@@ -44,12 +43,11 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	config.LocalStoreFilePath = localStoreFilePath
 	config.LocalStoreKey = localStoreKey
 
-	
 	changed, err := checkIfPasswordsChanged(config, nodes)
 	if err != nil {
 		t.Fatalf("Error checking if passwords changed: %v", err)
 	}
-	
+
 	require.False(t, changed, "Passwords should not have changed")
 
 	// Call GetPasswordsWithRetry to set previousPasswords
@@ -60,7 +58,7 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 		"Username": "admin",
 		"Password": "newpassword",
 		"Xname":    "x0c0s1b0",
-		"URL":   "https://x0c0s1b0/redfish/v1/Managers/BMC",
+		"URL":      "https://x0c0s1b0/redfish/v1/Managers/BMC",
 	}
 	err = ss.Store("hms-creds/x0c0s1b0", value)
 	require.NoError(t, err)
@@ -69,10 +67,9 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error checking if passwords changed: %v", err)
 	}
-	
+
 	require.True(t, changed, "Passwords should have changed")
 }
-
 
 func TestCheckIfKeysChanged(t *testing.T) {
 	tempDir := t.TempDir()
@@ -106,7 +103,6 @@ func TestCheckIfKeysChanged(t *testing.T) {
 	changed, err = checkIfKeysChanged(config)
 	require.NoError(t, err)
 	require.False(t, changed, "Keys should not have changed")
-
 
 	// Now change the key
 	newTestKey := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD8..."

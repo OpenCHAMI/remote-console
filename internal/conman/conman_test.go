@@ -3,8 +3,8 @@ package conman
 import (
 	"os"
 	"path/filepath"
-	"testing"
 	"strings"
+	"testing"
 
 	"github.com/Cray-HPE/hms-compcredentials"
 	"github.com/stretchr/testify/require"
@@ -12,20 +12,19 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
-
 func TestGenerateBaseConfig(t *testing.T) {
 	baseDir := "/tmp/conman_test"
-	
+
 	config := DefaultConmanConfig()
 	config.BaseConfFilePath = "../../scripts/conman.conf.tmpl"
 	config.ConfFilePath = filepath.Join(baseDir, "conman.conf")
 	config.LogFilesPath = filepath.Join(baseDir, "logs")
 	config.PidFilePath = filepath.Join(baseDir, "conman.pid")
-	
+
 	baseConfig, err := generateBaseConfig(config)
 	require.NoError(t, err)
 	require.NotEmpty(t, baseConfig)
-	
+
 	expected := `# UPDATE_CONFIG=TRUE
 SERVER keepalive=ON
 SERVER logdir="/tmp/conman_test/logs"
@@ -44,37 +43,37 @@ GLOBAL logopts="sanitize,timestamp"
 
 func TestConfigureConman(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	config := DefaultConmanConfig()
 	config.BaseConfFilePath = "../../scripts/conman.conf.tmpl"
 	config.ConfFilePath = filepath.Join(tempDir, "conman.conf")
 	config.LogFilesPath = filepath.Join(tempDir, "logs")
 	config.PidFilePath = filepath.Join(tempDir, "conman.pid")
-	
+
 	nodes := map[string]*types.NodeConsoleInfo{
 		"x0c0s1b0": &types.NodeConsoleInfo{
-			NodeName:  "x0c0s1b0",
+			NodeName: "x0c0s1b0",
 			BmcName:  "x0c0s1b0",
 			BmcFqdn:  "x0c0s1b0",
 			Class:    "River",
-			NID:      0,    
+			NID:      0,
 			Role:     "x0c0s1b0",
 		},
 		"x0c0s2b0": &types.NodeConsoleInfo{
-			NodeName:  "x0c0s2b0",
+			NodeName: "x0c0s2b0",
 			BmcName:  "x0c0s2b0",
 			BmcFqdn:  "x0c0s2b0",
 			Class:    "Mountain",
-			NID:      1,    
+			NID:      1,
 			Role:     "x0c0s2b0",
 		},
 		"x0c0s3b0": &types.NodeConsoleInfo{
-			NodeName:  "x0c0s3b0",
+			NodeName: "x0c0s3b0",
 			BmcName:  "x0c0s3b0",
 			BmcFqdn:  "x0c0s3b0",
 			Class:    "Paradise",
-			NID:      2,    
-			Role:     "x0c0s3b0",		
+			NID:      2,
+			Role:     "x0c0s3b0",
 		},
 	}
 
@@ -93,7 +92,7 @@ func TestConfigureConman(t *testing.T) {
 	updated, err := ConfigureConman(config, nodes, passwords)
 	require.NoError(t, err)
 	require.True(t, updated)
-	
+
 	// Read the generated config file
 	generatedConfig, err := os.ReadFile(config.ConfFilePath)
 	require.NoError(t, err)
@@ -120,4 +119,3 @@ console name="x0c0s3b0" dev="/usr/bin/ssh-pwd-console x0c0s3b0 admin password3"
 
 	require.Equal(t, expected, generatedConfigStr)
 }
-

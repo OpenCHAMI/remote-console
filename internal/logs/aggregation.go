@@ -26,7 +26,6 @@
 package logs
 
 import (
-
 	"context"
 	"fmt"
 	"log"
@@ -156,7 +155,6 @@ func RespinAggLog() {
 	conAggLogger = log.New(calf, "", 0)
 	conAggLogger.Print("Starting aggregation log")
 }
-
 
 func AggregateFiles(config LogConfig, nodes map[string]*types.NodeConsoleInfo) {
 	for xname := range nodes {

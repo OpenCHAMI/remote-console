@@ -146,7 +146,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	if err != nil {
 		log.Printf("Failed to tail file %s with error:%s", filename, err)
 		cts.conn.WriteMessage(websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console tail session"))
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console tail session"))
 		cts.conn.Close()
 		return
 	}

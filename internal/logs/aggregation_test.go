@@ -1,18 +1,18 @@
 package logs
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"testing"
-	"context"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/OpenCHAMI/remote-console/internal/types"
-)	
+)
 
 func TestWriteToAggLog(t *testing.T) {
 	tempDir := t.TempDir()
@@ -21,7 +21,7 @@ func TestWriteToAggLog(t *testing.T) {
 	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
 	lf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
-	
+
 	// Initialize logger
 	conAggMutex.Lock()
 	conAggLogger = log.New(lf, "", log.LstdFlags)
@@ -33,7 +33,7 @@ func TestWriteToAggLog(t *testing.T) {
 		"x0c0s1b2": "Third log line",
 	}
 
-	for xname,line := range testLines {
+	for xname, line := range testLines {
 		writeToAggLog(xname, line)
 	}
 
@@ -51,16 +51,15 @@ func TestWriteToAggLog(t *testing.T) {
 
 func TestWatchConsoleLogFile(t *testing.T) {
 	tempDir := t.TempDir()
-		// Set up aggregation log file path
+	// Set up aggregation log file path
 	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
 	lf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
-	
+
 	// Initialize logger
 	conAggMutex.Lock()
 	conAggLogger = log.New(lf, "", log.LstdFlags)
 	conAggMutex.Unlock()
-
 
 	// Set up a console log file
 	testXname := "x0c0s1b0"
@@ -69,17 +68,16 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	lf, err = os.OpenFile(consoleLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
 	defer lf.Close()
-	
+
 	config := DefaultLogConfig()
 	config.ConsoleLogPath = tempDir
-
 
 	// Start watching the console log file
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go watchConsoleLogFile(config, ctx, testXname)
-	
+
 	// Write some lines to the console log file
 	testLines := []string{
 		"First console log line",
@@ -108,7 +106,6 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	}
 }
 
-
 func TestAggregateFiles(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -116,7 +113,7 @@ func TestAggregateFiles(t *testing.T) {
 	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
 	lf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
-	
+
 	// Initialize logger
 	conAggMutex.Lock()
 	conAggLogger = log.New(lf, "", log.LstdFlags)
@@ -179,7 +176,7 @@ func TestAggregateFiles(t *testing.T) {
 			require.Contains(t, logContents, xname)
 		}
 	}
-}	
+}
 
 func TestRespinAggLog(t *testing.T) {
 	tempDir := t.TempDir()

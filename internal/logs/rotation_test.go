@@ -1,21 +1,20 @@
 package logs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-	"fmt"
 
-	"github.com/stretchr/testify/require"
 	"github.com/OpenCHAMI/remote-console/internal/types"
-
-)	
+	"github.com/stretchr/testify/require"
+)
 
 func TestInitLogRotate(t *testing.T) {
 	tempDir := t.TempDir()
 
-	config := DefaultLogConfig()	
+	config := DefaultLogConfig()
 	config.ConsoleLogPath = tempDir
 	config.ConsoleLogBackupPath = filepath.Join(tempDir, "backups")
 
@@ -31,11 +30,11 @@ func TestUpdateLogRotateConf(t *testing.T) {
 	conAggLogFile = "/tmp/consoleAgg-test.log"
 
 	config := DefaultLogConfig()
-	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")	
+	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
 
 	nodes := map[string]*types.NodeConsoleInfo{
-		"x0c0s1b0": { NodeName: "x0c0s1b0" },
-		"x0c0s1b1": { NodeName: "x0c0s1b1" },
+		"x0c0s1b0": {NodeName: "x0c0s1b0"},
+		"x0c0s1b1": {NodeName: "x0c0s1b1"},
 	}
 
 	UpdateLogRotateConf(config, nodes)
@@ -99,7 +98,7 @@ func TestReadLogRotTimestamps(t *testing.T) {
 	content := fmt.Sprintf(`# Log rotation timestamps
 "/var/log/conman/console.x0c0s1b0" %s
 "/var/log/conman/console.x0c0s1b1" %s
-`,  console1Timestamp.Format("2006-01-02-15:04:05"), console2Timestamp.Format("2006-01-02-15:04:05"))
+`, console1Timestamp.Format("2006-01-02-15:04:05"), console2Timestamp.Format("2006-01-02-15:04:05"))
 
 	config := DefaultLogConfig()
 	config.LogRotateStateFilePath = logRotTimestampsFile
@@ -121,8 +120,7 @@ func TestReadLogRotTimestamps(t *testing.T) {
 	}
 
 	require.Equal(t, expected, fileStamp, "Timestamps should match expected values")
-}	
-
+}
 
 func TestRotateLogsOnce(t *testing.T) {
 	tempDir := t.TempDir()
@@ -131,22 +129,20 @@ func TestRotateLogsOnce(t *testing.T) {
 	err := os.MkdirAll(logBackupDir, 0755)
 	require.NoError(t, err)
 
-
 	config := DefaultLogConfig()
 	config.LogRotateStateFilePath = logRotateStateFilePath
 	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
 	config.ConsoleLogPath = tempDir
 	config.ConsoleLogBackupPath = logBackupDir
 	config.ConsoleLogRotateEnabled = true
-	config.ConsoleLogFileSize = "1K" 
+	config.ConsoleLogFileSize = "1K"
 
 	nodes := map[string]*types.NodeConsoleInfo{
-		"x0c0s1b0": { NodeName: "x0c0s1b0" },
-		"x0c0s1b1": { NodeName: "x0c0s1b1" },
+		"x0c0s1b0": {NodeName: "x0c0s1b0"},
+		"x0c0s1b1": {NodeName: "x0c0s1b1"},
 	}
 
 	UpdateLogRotateConf(config, nodes)
-
 
 	// Perform log rotation check
 	fileStamp := make(map[string]time.Time)

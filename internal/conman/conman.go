@@ -13,13 +13,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"text/template"
 	"time"
-	"sort"
-
 
 	"github.com/Cray-HPE/hms-compcredentials"
 
@@ -31,27 +30,26 @@ var conmanMutex = &sync.Mutex{}
 var command *exec.Cmd = nil
 
 type ConmanConfig struct {
-	DebugOnly        bool
-	BaseConfFilePath string
-	ConfFilePath     string
-	LogFilesPath      string
-	PidFilePath      string
+	DebugOnly          bool
+	BaseConfFilePath   string
+	ConfFilePath       string
+	LogFilesPath       string
+	PidFilePath        string
 	ConsoleScriptsPath string
 }
 
 func DefaultConmanConfig() ConmanConfig {
 	return ConmanConfig{
-		DebugOnly: false,
-		BaseConfFilePath: "/app/conman_base.conf.tmpl",
-		ConfFilePath:     "/etc/conman.conf",
-		LogFilesPath:      "/var/log/conman",
-		PidFilePath:      "/var/run/conman.pid",
+		DebugOnly:          false,
+		BaseConfFilePath:   "/app/conman_base.conf.tmpl",
+		ConfFilePath:       "/etc/conman.conf",
+		LogFilesPath:       "/var/log/conman",
+		PidFilePath:        "/var/run/conman.pid",
 		ConsoleScriptsPath: "/usr/bin",
 	}
 }
 
-
-func ConfigureConman(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords  map[string]compcredentials.CompCredentials) (bool, error) {
+func ConfigureConman(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error) {
 	conmanMutex.Lock()
 	defer conmanMutex.Unlock()
 
@@ -62,28 +60,28 @@ func generateBaseConfig(config ConmanConfig) ([]byte, error) {
 
 	// Read template file
 	log.Printf("Opening base configuration file: %s", config.BaseConfFilePath)
-    tmplContent, err := os.ReadFile(config.BaseConfFilePath)
-    if err != nil {
-        return nil, fmt.Errorf("error opening base config template: %s", err)
-    }
+	tmplContent, err := os.ReadFile(config.BaseConfFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("error opening base config template: %s", err)
+	}
 
-    // Parse and execute template
-    tmpl, err := template.New("conman").Parse(string(tmplContent))
-    if err != nil {
-        return nil, fmt.Errorf("error templating base config: %s", err)
-    }
+	// Parse and execute template
+	tmpl, err := template.New("conman").Parse(string(tmplContent))
+	if err != nil {
+		return nil, fmt.Errorf("error templating base config: %s", err)
+	}
 
-    var buf bytes.Buffer
-    if err := tmpl.Execute(&buf, config); err != nil {
-        return nil, fmt.Errorf("error templating base config: %s", err)
-    }
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, config); err != nil {
+		return nil, fmt.Errorf("error templating base config: %s", err)
+	}
 
 	return buf.Bytes(), nil
 }
 
-func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords  map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
+func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
 	log.Print("Updating the configuration file")
-	
+
 	bs, err := generateBaseConfig(config)
 	if err != nil {
 		return false, fmt.Errorf("Unable to template base config file: %v", err)
@@ -97,7 +95,7 @@ func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleIn
 	log.Printf("Opening conman configuration file for output: %s", config.ConfFilePath)
 	cf, err := os.OpenFile(config.ConfFilePath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return false , fmt.Errorf("Unable to open config file to write: %v", err)
+		return false, fmt.Errorf("Unable to open config file to write: %v", err)
 	}
 	defer cf.Close()
 
@@ -189,7 +187,7 @@ func SignalConmanHUP(config ConmanConfig) {
 	} else {
 		log.Print("Warning: Attempting to signal conman process when nil.")
 
-		if config.DebugOnly && nodes.CurrentNodes() != nil  {
+		if config.DebugOnly && nodes.CurrentNodes() != nil {
 			log.Printf("Respinning current log test files...")
 			for _, nci := range nodes.CurrentNodes() {
 				go createTestLogFile(config, nci.NodeName, true)
@@ -249,7 +247,6 @@ func createTestLogFile(config ConmanConfig, xname string, respin bool) {
 	//  are no real console connections present.
 	sleepTime := 1 * time.Second
 	filename := fmt.Sprintf("%s/console.%s", config.LogFilesPath, xname)
-
 
 	// Ff respin is true, only create if the file is not present - meant to
 	// be used when a logrotation has moved the original file and we need to

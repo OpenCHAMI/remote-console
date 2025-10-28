@@ -27,11 +27,11 @@
 package console
 
 import (
-		"fmt"
-		"log"
-		"net/http"
-		"github.com/OpenCHAMI/remote-console/internal/nodes"
-		"github.com/OpenCHAMI/remote-console/internal/utils"
+	"fmt"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/utils"
+	"log"
+	"net/http"
 )
 
 type HealthService interface {
@@ -54,12 +54,12 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 	//  administrators to aid in determining the health of this service.
 
 	// only allow 'GET' calls
-	   if r.Method != http.MethodGet {
-		   w.Header().Set("Allow", "GET")
-		   utils.SendJSONError(w, http.StatusMethodNotAllowed,
-			   fmt.Sprintf("(%s) Not Allowed", r.Method))
-		   return
-	   }
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		utils.SendJSONError(w, http.StatusMethodNotAllowed,
+			fmt.Sprintf("(%s) Not Allowed", r.Method))
+		return
+	}
 
 	// get the current health status
 	stats := getCurrentHealth()
@@ -86,12 +86,12 @@ func doLiveness(w http.ResponseWriter, r *http.Request) {
 	//  used to indicate the server is still alive and processing requests.
 
 	// only allow 'GET' calls
-	   if r.Method != http.MethodGet {
-		   w.Header().Set("Allow", "GET")
-		   utils.SendJSONError(w, http.StatusMethodNotAllowed,
-			   fmt.Sprintf("(%s) Not Allowed", r.Method))
-		   return
-	   }
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		utils.SendJSONError(w, http.StatusMethodNotAllowed,
+			fmt.Sprintf("(%s) Not Allowed", r.Method))
+		return
+	}
 
 	// return simple StatusOK response to indicate server is alive
 	w.WriteHeader(http.StatusNoContent)

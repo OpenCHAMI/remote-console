@@ -36,33 +36,33 @@ import (
 	sstorage "github.com/Cray-HPE/hms-securestorage"
 )
 
-type CredsConfig struct {	
-	DebugOnly bool
-	SshConsoleKeyPath string
+type CredsConfig struct {
+	DebugOnly            bool
+	SshConsoleKeyPath    string
 	SecureStorageAdapter StorageAdapter
-	VaultBasePath   string
-	VaultRole       string
-	LocalStoreFilePath string
-	LocalStoreKey string	
+	VaultBasePath        string
+	VaultRole            string
+	LocalStoreFilePath   string
+	LocalStoreKey        string
 }
 
 func DefaultCredsConfig() CredsConfig {
-	return CredsConfig{		
-		SshConsoleKeyPath: "/app/conman.key",
-		VaultBasePath:		"secret",
-		VaultRole:			"",
-		DebugOnly:			false,
+	return CredsConfig{
+		SshConsoleKeyPath:    "/app/conman.key",
+		VaultBasePath:        "secret",
+		VaultRole:            "",
+		DebugOnly:            false,
 		SecureStorageAdapter: StorageAdapterVault,
-		LocalStoreFilePath:  "",
-		LocalStoreKey:       "",		
+		LocalStoreFilePath:   "",
+		LocalStoreKey:        "",
 	}
 }
 
 type StorageAdapter string
 
 const (
-    StorageAdapterVault StorageAdapter = "vault"
-    StorageAdapterLocal StorageAdapter = "local"
+	StorageAdapterVault StorageAdapter = "vault"
+	StorageAdapterLocal StorageAdapter = "local"
 )
 
 const (
@@ -70,20 +70,20 @@ const (
 )
 
 func NewStorageAdapter(value string) (StorageAdapter, error) {
-    adapter := StorageAdapter(value)
-    if err := adapter.Validate(); err != nil {
-        return "", err 
-    }
-    return adapter, nil
+	adapter := StorageAdapter(value)
+	if err := adapter.Validate(); err != nil {
+		return "", err
+	}
+	return adapter, nil
 }
 
 func (s StorageAdapter) Validate() error {
-    switch s {
-    case StorageAdapterVault, StorageAdapterLocal:
-        return nil
-    default:
-        return fmt.Errorf("invalid storage adapter %q", s)
-    }
+	switch s {
+	case StorageAdapterVault, StorageAdapterLocal:
+		return nil
+	default:
+		return fmt.Errorf("invalid storage adapter %q", s)
+	}
 }
 
 // TODO can these be private?
@@ -101,7 +101,7 @@ var DebugOnly bool = false
 var previousPasswords map[string]compcreds.CompCredentials = nil
 
 type sshKeys struct {
-	PrivateKey     string `json:"privateKey"`
+	PrivateKey  string  `json:"privateKey"`
 	Certificate *string `json:"certificate"`
 }
 
@@ -156,12 +156,11 @@ func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
 		}
 	default:
 		return nil, fmt.Errorf("invalid secure storage adapter type: %s\n", config.SecureStorageAdapter)
-		
+
 	}
 
 	return ss, nil
 }
-
 
 // Look up the creds for the input endpoints
 func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.CompCredentials, error) {

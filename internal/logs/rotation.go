@@ -34,11 +34,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/utils"
 	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 var logMutex = &sync.Mutex{}
@@ -52,9 +52,8 @@ func InitLogRotate(config LogConfig) {
 	utils.EnsureDirPresent(config.ConsoleLogBackupPath, 0755)
 }
 
-
 // UpdateLogRotateConf updates the log rotation configuration file
-func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleInfo ) {
+func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleInfo) {
 	log.Printf("before log mutex")
 	logMutex.Lock()
 	defer logMutex.Unlock()
@@ -174,7 +173,7 @@ func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (con
 		if err != nil {
 			break
 		}
-		
+
 		fmt.Println(line)
 
 		if fileName, fd, isCon, isAgg := parseTimestamp(config, line); isCon || isAgg {
@@ -204,19 +203,19 @@ func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (con
 }
 
 // LogRotate performs a log rotation check and rotation if needed
-func LogRotate(config LogConfig) bool{
+func LogRotate(config LogConfig) bool {
 	consoleLogChanged := false
 	fileStamp := make(map[string]time.Time)
 	readLogRotTimestamps(config, fileStamp)
 
 	if config.ConsoleLogRotateEnabled {
-		consoleLogChanged  = rotateLogsOnce(config, fileStamp)
+		consoleLogChanged = rotateLogsOnce(config, fileStamp)
 	}
-	
+
 	return consoleLogChanged
 }
 
-func rotateLogsOnce(config LogConfig,  fileStamp map[string]time.Time) bool {
+func rotateLogsOnce(config LogConfig, fileStamp map[string]time.Time) bool {
 	conChanged := false
 	aggChanged := false
 	log.Print("LOG ROTATE: Starting logrotate")
