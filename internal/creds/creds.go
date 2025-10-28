@@ -27,6 +27,7 @@ package creds
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -34,10 +35,61 @@ import (
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	sstorage "github.com/Cray-HPE/hms-securestorage"
 )
+
+type CredsConfig struct {	
+	DebugOnly bool
+	SshConsoleKeyPath string
+	SecureStorageAdapter StorageAdapter
+	VaultBasePath   string
+	VaultRole       string
+	LocalStoreFilePath string
+	LocalStoreKey string	
+}
+
+func DefaultCredsConfig() CredsConfig {
+	return CredsConfig{		
+		SshConsoleKeyPath: "/app/conman.key",
+		VaultBasePath:		"secret",
+		VaultRole:			"",
+		DebugOnly:			false,
+		SecureStorageAdapter: StorageAdapterVault,
+		LocalStoreFilePath:  "",
+		LocalStoreKey:       "",		
+	}
+}
+
+type StorageAdapter string
+
+const (
+    StorageAdapterVault StorageAdapter = "vault"
+    StorageAdapterLocal StorageAdapter = "local"
+)
+
+const (
+	consoleKeysPath string = "bmc-console-keys"
+)
+
+func NewStorageAdapter(value string) (StorageAdapter, error) {
+    adapter := StorageAdapter(value)
+    if err := adapter.Validate(); err != nil {
+        return "", err 
+    }
+    return adapter, nil
+}
+
+func (s StorageAdapter) Validate() error {
+    switch s {
+    case StorageAdapterVault, StorageAdapterLocal:
+        return nil
+    default:
+        return fmt.Errorf("invalid storage adapter %q", s)
+    }
+}
+
 // TODO can these be private?
 // Also where should the point to!
-const SshConsoleKeyPath string = "/var/log/console/conman.key"
-const SshConsoleKeyPubCertPath string = "/var/log/console/conman.key-cert.pub"
+//const SshConsoleKeyPath string = "/var/log/console/conman.key"
+//const SshConsoleKeyPubCertPath string = "/var/log/console/conman.key-cert.pub"
 
 var PreviousPrivateKeyHash []byte = nil
 var PreviousCertHash []byte = nil
@@ -55,12 +107,15 @@ type sshKeys struct {
 
 // Look up the creds for the input endpoints with retries
 // TODO: I don't think we need this retry logic here any more?
-func GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
+func GetPasswordsWithRetries(config CredsConfig, bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
 	var passwords map[string]compcreds.CompCredentials = nil
+	var err error = nil
 	for numTries := 0; numTries < maxTries; numTries++ {
 		log.Printf("Get passwords with retry: %d", numTries)
-		passwords = GetPasswords(bmcXNames)
-		log.Printf("Retrieved %v", passwords)
+		passwords, err = getPasswords(config, bmcXNames)
+		if err != nil {
+			log.Printf("Error retrieving passwords: %v", err)
+		}
 
 		foundAll := true
 		for _, nn := range bmcXNames {
@@ -72,41 +127,64 @@ func GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[str
 		}
 		if foundAll {
 			log.Printf("Retrieved all passwords")
-			return passwords
+			break
 		}
 		log.Printf("Attempt %d - Only retrieved %d of %d River creds from vault, waiting and trying again...",
 			numTries, len(passwords), len(bmcXNames))
 		time.Sleep(time.Duration(waitSecs) * time.Second)
 	}
 	log.Printf("Maximum password attempts reached, configuring conman with what we have.")
+
+	previousPasswords = passwords
+
 	return passwords
 }
 
+func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
+	var ss sstorage.SecureStorage = nil
+	var err error = nil
+	switch config.SecureStorageAdapter {
+	case StorageAdapterVault:
+		ss, err = sstorage.NewVaultAdapterAs(config.VaultBasePath, config.VaultRole)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create vault secure storage adapter: %#v\n", err)
+		}
+	case StorageAdapterLocal:
+		ss, err = sstorage.NewLocalSecretStore(config.LocalStoreKey, config.LocalStoreFilePath, false)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create local file secure storage adapter: %#v\n", err)
+		}
+	default:
+		return nil, fmt.Errorf("invalid secure storage adapter type: %s\n", config.SecureStorageAdapter)
+		
+	}
+
+	return ss, nil
+}
+
+
 // Look up the creds for the input endpoints
-func GetPasswords(bmcXNames []string) map[string]compcreds.CompCredentials {
+func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.CompCredentials, error) {
 	// NOTE: in update config thread
 	// if running in debug mode, skip hsm query
 	// TODO: DebugOnly should be passed in or imported from config
 	if DebugOnly {
 		log.Print("DEBUGONLY mode - skipping creds query")
-		return nil
+		return nil, nil
 	}
 
-	log.Print("Gathering creds from vault")
-	ss, err := sstorage.NewVaultAdapter("")
+	ss, err := createSecureStorage(config)
 	if err != nil {
-		log.Panicf("Error: %#v\n", err)
+		return nil, fmt.Errorf("error creating secure storage adapter %#v\n", err)
 	}
 
 	ccs := compcreds.NewCompCredStore("hms-creds", ss)
 	ccreds, err := ccs.GetCompCreds(bmcXNames)
 	if err != nil {
-		log.Panicf("Error: %#v\n", err)
+		return nil, fmt.Errorf("error create comp creds store: %#v\n", err)
 	}
 
-	previousPasswords = ccreds
-
-	return ccreds
+	return ccreds, nil
 }
 
 func HashString(s string) ([]byte, error) {
@@ -117,59 +195,36 @@ func HashString(s string) ([]byte, error) {
 	return hasher.Sum(nil), nil
 }
 
-
-
-func EnsureConsoleKeysPresent() bool {
+func EnsureConsoleKeysPresent(config CredsConfig) (bool, error) {
 	retVal := false
-	// TODO: DebugOnly should be passed in or imported from config
-	// if DebugOnly {
-	// 	log.Print("Running in debug mode - skipping mountain cred generation")
-	// 	return retVal
-	// }
+	if config.DebugOnly {
+		log.Print("Running in debug mode - skipping mountain cred generation")
+		return false, nil
+	}
 
-	vaultBasePath := os.Getenv("VAULT_BASE_PATH")
-	if len(vaultBasePath) == 0 {
-		log.Printf("Warning: VAULT_BASE_PATH environment variable is not set, defaulting to 'secret'")
-		vaultBasePath = "secret"
-	}
-	vaultRole := os.Getenv("VAULT_ROLE")
-	if len(vaultRole) == 0 {
-		log.Printf("Warning: VAULT_ROLE environment variable is not set, defaulting to ''")
-		vaultRole = ""
-	}
-	consolePrivateKeyName := os.Getenv("CONSOLE_KEYS_NAME")
-	if len(consolePrivateKeyName) == 0 {
-		log.Printf("Warning: CONSOLE_KEYS_NAME environment variable is not set, defaulting to 'bmc-console-keys'")
-		consolePrivateKeyName = "bmc-console-keys"
-	}
-	ss, err := sstorage.NewVaultAdapterAs(vaultBasePath, vaultRole)
+	ss, err := createSecureStorage(config)
 	if err != nil {
-		log.Panicf("Error: Unable to create secure storage adapter: %#v\n", err)
+		return false, fmt.Errorf("unable to create secure storage adapter: %v", err)
 	}
 	var consoleKeys sshKeys
-	err = ss.Lookup(consolePrivateKeyName, &consoleKeys)
+	err = ss.Lookup(consoleKeysPath, &consoleKeys)
 	if err != nil {
-		log.Panicf("Error: Unable to lookup private key: %#v\n", err)
+		return false, fmt.Errorf("unable to lookup private key: %v", err)
 	}
-
-	log.Printf("consolePrivateKey: %v", consoleKeys.PrivateKey)
 
 	newHash, err := HashString(consoleKeys.PrivateKey)
 	if err != nil {
-		log.Printf("Error: Failed to hash the private ssh key received from Vault. Err: %s", err)
+		return false, fmt.Errorf("failed to hash the private ssh key received from Vault. %v", err)
 	} else if PreviousPrivateKeyHash == nil || !(bytes.Equal(newHash, PreviousPrivateKeyHash)) {
 		retVal = true
 		PreviousPrivateKeyHash = newHash
-		err = os.WriteFile(SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
+		err = os.WriteFile(config.SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
 		if err != nil {
-			log.Printf("Error: Failed to write our the private ssh key received from Vault. Err: %s", err)
-			return retVal
+			return false, fmt.Errorf("failed to write our the private ssh key received from Vault. Err: %v", err)
 		}
 		log.Printf("Console ssh key file created")
-		return retVal
 	} else {
 		log.Printf("Console ssh key file already exists")
-		return retVal
 	}
 
 	if consoleKeys.Certificate != nil {
@@ -179,18 +234,16 @@ func EnsureConsoleKeysPresent() bool {
 		} else if PreviousCertHash == nil || !(bytes.Equal(newHash, PreviousCertHash)) {
 			retVal = true
 			PreviousCertHash = newHash
-			err = os.WriteFile(SshConsoleKeyPubCertPath, []byte(*consoleKeys.Certificate), 0644)
+			sshConsoleCertPath := config.SshConsoleKeyPath + "-cert.pub"
+			err = os.WriteFile(sshConsoleCertPath, []byte(*consoleKeys.Certificate), 0644)
 			if err != nil {
-				log.Printf("Error: Failed to write our the public ssh cert received from Vault. Err: %s", err)
-				return retVal
+				return false, fmt.Errorf("failed to write our the public ssh cert %v", err)
 			}
 			log.Printf("Console ssh cert file created")
-			return retVal
 		} else {
 			log.Printf("Console ssh cert file already exists")
-			return retVal
 		}
 	}
 
-	return retVal
+	return retVal, nil
 }

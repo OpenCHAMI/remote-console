@@ -35,7 +35,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"strconv"
 
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
@@ -58,7 +57,7 @@ var (
 	inShutdown bool = false
 
 	// Pause between each lookup for new node information
-	 newNodeLookupSec int = 120
+	newNodeLookupSec int = 120
 
 	// Time to wait between checking for credential changes
 	monitorIntervalSecs int = 30
@@ -80,23 +79,26 @@ func isShuttingDown() bool {
 func watchForNodesUpdates() {
 	for {
 		// look for new nodes once
-		if isShuttingDown != nil && isShuttingDown() {
+		if isShuttingDown() {
 			log.Printf("Info: Exiting node watch loop due to shutdown")
 			return
 		}
-		changed := nodes.CheckForUpdates()
+		changed := nodes.CheckForUpdates(smdURL())
 
 		if changed {
 			log.Printf("Info: Node changes detected, signaling conman to restart")
 			conman.SignalConmanTERM()
 
+			nodes := nodes.CurrentNodes()
+
 			// also update log rotation configuration
 			log.Printf("Info: Node changes detected, updating log rotation configuration")
-			logs.UpdateLogRotateConf()
+			config := logConfig()
+			logs.UpdateLogRotateConf(config)
 
 			// make sure we are aggregating any new console log files
 			log.Printf("Info: Node changes detected, updating log aggregation configuration")
-			logs.AggregateFiles()
+			logs.AggregateFiles(config, nodes)
 		}
 
 		// Wait for the correct polling interval
@@ -104,11 +106,16 @@ func watchForNodesUpdates() {
 	}
 }
 
+
+
 // Watch for credential updates and signal conman as needed
-func watchForCredUpdates() {
+func watchForCredUpdates(config creds.CredsConfig) {
 	time.Sleep(time.Duration(monitorIntervalSecs) * time.Second)
 	for {
-		changed :=  creds.CheckForUpdates()
+		changed, err :=  creds.CheckForUpdates(config)
+		if err != nil {
+			log.Printf("Error checking for credential updates: %s", err)
+		}
 
 		if changed {
 			log.Printf("Info: Credential changes detected, signaling conman to restart")
@@ -120,63 +127,23 @@ func watchForCredUpdates() {
 }
 
 
-func isTrue(str string) bool {
-	lStr := strings.ToLower(str)
-	if len(lStr) == 1 && (lStr[0] == 't' || lStr[0] == '1') {
-		return true
-	}
-	if len(lStr) > 1 && lStr == "true" {
-		return true
-	}
-	return false
-}
-
 // Log rotation setup and loop
 func logRotate() {
-	var logRotEnabled bool = true
-	var logRotCheckFreqSec = 600
-	var logRotConFileSize string = "5M"  // size of the console log file to rotate
-	var logRotConNumRotate int = 2       // number of console log backup copies to keep
-	var logRotAggFileSize string = "20M" // size of the aggregation file to rotate
-	var logRotAggNumRotate int = 1       // number of aggregation backup copies to keep
-
-		// Check for log rotation env vars
-	if val := os.Getenv("LOG_ROTATE_ENABLE"); val != "" {
-		log.Printf("Found LOG_ROTATE_ENABLE: %s", val)
-		logRotEnabled = isTrue(val)
-	}
-	if val := os.Getenv("LOG_ROTATE_FILE_SIZE"); val != "" {
-		log.Printf("Found LOG_ROTATE_FILE_SIZE: %s", val)
-		logRotConFileSize = val
-	}
-	if val := os.Getenv("LOG_ROTATE_SEC_FREQ"); val != "" {
-		log.Printf("Found LOG_ROTATE_SEC_FREQ: %s", val)
-		envFreq, err := strconv.Atoi(val)
-		if err != nil {
-			log.Printf("Error converting log rotation frequency - expected an integer:%s", err)
-		} else {
-			logRotCheckFreqSec = envFreq
-		}
-	}
-	if val := os.Getenv("LOG_ROTATE_NUM_KEEP"); val != "" {
-		log.Printf("Found LOG_ROTATE_NUM_KEEP: %s", val)
-		envNum, err := strconv.Atoi(val)
-		if err != nil {
-			log.Printf("Error converting log rotation number - expected an integer:%s", err)
-		} else {
-			logRotConNumRotate = envNum
-		}
-	}
+	logConfig := logConfig()
+	conmanConfig := conmanConfig()
 
 	// log the log rotation parameters
-	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logRotEnabled, logRotCheckFreqSec)
-	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logRotConFileSize, logRotConNumRotate)
-	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logRotAggFileSize, logRotAggNumRotate)
+	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logConfig.ConsoleLogRotateEnabled, logConfig.RotateCheckFrequency)
+	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logConfig.ConsoleLogFileSize, logConfig.ConsoleLogNumRotate)
+	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logConfig.AggLogFileSize, logConfig.AggLogNumRotate)
 
 	// Init log rotation
-	logs.InitLogRotate(logRotEnabled, logRotCheckFreqSec, logRotConFileSize, logRotConNumRotate,  logRotAggFileSize, logRotAggNumRotate)
+	logs.InitLogRotate(logConfig)
+	// Create the log rotation configuration file
+	logs.UpdateLogRotateConf(logConfig, nodes.CurrentNodes())
 
 	sleepSecs := time.Duration(300) * time.Second
+	logRotCheckFreqSec := logConfig.RotateCheckFrequency
 	if logRotCheckFreqSec > 0 {
 		sleepSecs = time.Duration(logRotCheckFreqSec) * time.Second
 	} else {
@@ -184,25 +151,59 @@ func logRotate() {
 	}
 
 	for {
-		restartConman := logs.LogRotate()
+		restartConman := logs.LogRotate(logConfig)
 		if restartConman {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
-			conman.SignalConmanHUP()
+			conman.SignalConmanHUP(conmanConfig)
 		}
 
 		time.Sleep(sleepSecs)
 	}
 } 
 
+func runConman()  {
+	conmanConfig := conmanConfig()
 
+	credsConfig, err := credsConfig()
+	if err != nil {
+		log.Panicf("Error getting creds config: %s", err)
+	}
+
+	for {
+		nodes := nodes.CurrentNodes()
+
+		var requirePasswords []string
+		for _, nci := range nodes {
+			if nci.IsIPMI() || nci.IsPassSSH()  {
+				requirePasswords = append(requirePasswords, nci.BmcName)
+			}
+		}
+
+		passwords := creds.GetPasswordsWithRetries(credsConfig, requirePasswords, 15, 10)
+		hasNodes := conman.ConfigureConman(conmanConfig, nodes, passwords)
+
+		if conmanConfig.DebugOnly {
+			time.Sleep(25 * time.Second)
+			log.Printf("Sleeping the executeConman process")
+		} else if !hasNodes {
+			log.Printf("No console nodes found - trying again")
+			time.Sleep(30 * time.Second)
+		} else {
+			conman.ExecuteConman(conmanConfig)
+		}
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func smdURL() string {
+	return getEnv("SMD_URL", "http://cray-smd/")
+}
 
 func main() {
 	// Enable debug logging if requested.
 	debugLog.Init()
 
 	// allow for changes in the SMD URL
-	nodes.HsmURL = getEnv("SMD_URL", "http://cray-smd/")
-	nodes.DebugOnly = getEnv("DEBUG", "false") == "true"
 	svcHost = getEnv("SVC_HOST", "0.0.0.0:8080")
 
 	log.Printf("Remote console service starting")
@@ -210,8 +211,9 @@ func main() {
 	log.Printf("Starting zombie killer...")
 	go conman.WatchForZombies()
 
+	conmanConfig := conmanConfig()
 	// then we set up the goroutine that controls conman
-	_, err := utils.EnsureDirPresent("/var/log/conman", 0755)
+	_, err := utils.EnsureDirPresent(conmanConfig.LogFilesPath, 0755)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -228,10 +230,15 @@ func main() {
 	go watchForNodesUpdates()
 
 	// start up the thread that runs conman
-	go conman.RunConman()
+	go runConman()
 
 	// start the thread that will make sure that the conman creds are correct
-	go watchForCredUpdates()
+	credsConfig, err := credsConfig()
+	if err != nil {
+		log.Panicf("Error getting creds config: %s", err)
+	}
+
+	go watchForCredUpdates(credsConfig)
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs

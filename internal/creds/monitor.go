@@ -6,6 +6,7 @@
 package creds
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
@@ -17,7 +18,7 @@ type SignalConmanTERM func ()
 var MonitorIntervalSecs int = 30
 
 // function to do check for credential changes and restart conman if necessary
-func CheckForUpdates() bool{
+func CheckForUpdates(config CredsConfig) (bool, error) {
 	restartConman := false
 
 	var xnames []string = nil
@@ -32,25 +33,35 @@ func CheckForUpdates() bool{
 		}
 	}
 
-	log.Printf("sshKeyAuth: %v", sshKeyAuth) 
-
-	if sshKeyAuth && checkIfKeysChanged() {
-		restartConman = true
+	changed, err := checkIfKeysChanged(config)
+	if err != nil {
+		return false, err
 	}
 
-	if len(xnames) > 0 && checkIfPasswordsChanged(xnames) {
-		restartConman = true
+	restartConman =  sshKeyAuth && changed 
+
+	changed, err = checkIfPasswordsChanged(config, xnames)
+	if err != nil {
+		return false, err
 	}
 
-	return restartConman
+	restartConman =  len(xnames) > 0 &&  changed || restartConman
+
+	return restartConman, nil
 }
 
 
-func checkIfPasswordsChanged(xnames []string) bool {
+func checkIfPasswordsChanged(config CredsConfig, xnames []string) (bool, error) {
 	if previousPasswords == nil {
-		return false
+		fmt.Printf("No previous passwords stored, cannot check for changes\n")
+		return false, nil
 	}
-	currentPasswords := GetPasswords(xnames)
+	currentPasswords, err := getPasswords(config, xnames)
+
+	if err != nil {
+		log.Printf("Error retrieving passwords while checking for credential changes: %v", err)
+		return false, err
+	}
 	for _, xname := range xnames {
 		currentCreds, ok := currentPasswords[xname]
 		if !ok {
@@ -58,14 +69,16 @@ func checkIfPasswordsChanged(xnames []string) bool {
 			continue
 		}
 		previousCreds, _ := previousPasswords[xname]
+
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
-			log.Printf("Change detected in the river passwords.  Conman will be reconfigured.")
-			return true
+			log.Printf("Change detected in the passwords.  Conman will be reconfigured.")
+			return true, nil
 		}
 	}
-	return false
+
+	return false, nil
 }
 
-func checkIfKeysChanged() bool {
-	return EnsureConsoleKeysPresent()
+func checkIfKeysChanged(config CredsConfig) (bool, error) {
+	return EnsureConsoleKeysPresent(config)
 }

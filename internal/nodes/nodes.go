@@ -38,14 +38,6 @@ import (
 		"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
-var (
-	// HsmURL is the base URL for HSM/SMD API
-	HsmURL = "http://cray-smd/"
-	
-	// DebugOnly mode prevents actual operations
-	DebugOnly = false
-)
-
 
 var hardwareUpdateTime string = "Unknown"
 
@@ -93,13 +85,13 @@ func (sc stateComponent) String() string {
 }
 
 // getRedfishEndpoints queries HSM for redfish endpoint information
-func getRedfishEndpoints() ([]redfishEndpoint, error) {
+func getRedfishEndpoints(smdURL string) ([]redfishEndpoint, error) {
 	type response struct {
 		RedfishEndpoints []redfishEndpoint
 	}
 
 	// Query hsm to get the redfish endpoints
-	URL := HsmURL + "hsm/v2/Inventory/RedfishEndpoints"
+	URL := smdURL + "hsm/v2/Inventory/RedfishEndpoints"
 		data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get redfish endpoints from hsm:%s", err)
@@ -118,14 +110,14 @@ func getRedfishEndpoints() ([]redfishEndpoint, error) {
 }
 
 // getStateComponents queries HSM for state component information
-func getStateComponents() ([]stateComponent, error) {
+func getStateComponents(smdURL string) ([]stateComponent, error) {
 	// get the component states from hsm - includes river/mountain information
 	type response struct {
 		Components []stateComponent
 	}
 
 	// get the state components from hsm
-	URL := HsmURL + "hsm/v2/State/Components"
+	URL := smdURL + "hsm/v2/State/Components"
 		data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get state component information from hsm:%s", err)
@@ -145,7 +137,7 @@ func getStateComponents() ([]stateComponent, error) {
 }
 
 // getParadiseNodes queries HSM for Paradise (xd224) nodes
-func getParadiseNodes() (map[string]struct{}, error) {
+func getParadiseNodes(smdURL string) (map[string]struct{}, error) {
 	// Paradise nodes are identified by having the manufacturer as 'Foxconn' and
 	// the model as either 'HPE Cray Supercomputing XD224' or '1A62WCB00-600-G'.
 	// There are a limited number of units that were sent to the field with the
@@ -172,7 +164,7 @@ func getParadiseNodes() (map[string]struct{}, error) {
 	// Query hsm to get the Paradise nodes
 	// NOTE: this only pulls the Foxconn BMCs from the inventory so there is a bit of
 	//  server side filtering going on
-	URL := HsmURL + "hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
+	URL := smdURL + "hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
 		data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
 		log.Printf("Unable to get hardware inventory from hsm:%s", err)
@@ -200,19 +192,19 @@ func getParadiseNodes() (map[string]struct{}, error) {
 }
 
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
-func GetCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
+func GetCurrentNodesFromHSM(smdURL string) (nodes []types.NodeConsoleInfo) {
 	// Get the BMC IP addresses and user, and password for individual nodes.
 	// conman is only set up for River nodes.
 	log.Printf("Starting to get current nodes on the system")
 
-	rfEndpoints, err := getRedfishEndpoints()
+	rfEndpoints, err := getRedfishEndpoints(smdURL)
 	if err != nil {
 		log.Printf("Unable to build configuration file - error fetching redfish endpoints: %s", err)
 		return nil
 	}
 
 	// get the state information to find mountain/river designation
-	stComps, err := getStateComponents()
+	stComps, err := getStateComponents(smdURL)
 	if err != nil {
 		log.Printf("Unable to build configuration file - error fetching state components: %s", err)
 		return nil
@@ -223,7 +215,7 @@ func GetCurrentNodesFromHSM() (nodes []types.NodeConsoleInfo) {
 	// get the paradise nodes
 	// NOTE: this returns a pseudo-set to speed up lookups
 	// TODO clean up paradise node handling
-	paradiseNodes, err := getParadiseNodes()
+	paradiseNodes, err := getParadiseNodes(smdURL)
 	if err != nil {
 		// log the error but don't die - most systems will not have Paradise nodes anyway
 		log.Printf("Unable to identify if there are any Paradise nodes on the system. %s", err)
@@ -320,14 +312,14 @@ func updateNodes(nodes []types.NodeConsoleInfo) bool {
 }
 
 
-func CheckForUpdates() bool{
+func CheckForUpdates(smdURL string) bool{
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 
 	log.Printf("Getting current nodes from HSM")
 	// keep track of if we need to redo the configuration
 	changed := false
 
-	fetched_nodes := GetCurrentNodesFromHSM()
+	fetched_nodes := GetCurrentNodesFromHSM(smdURL)
 
 	log.Printf("Fetched %d nodes from HSM", len(fetched_nodes))
 

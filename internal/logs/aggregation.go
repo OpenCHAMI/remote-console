@@ -37,7 +37,7 @@ import (
 
 	"github.com/hpcloud/tail"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
 // Global vars
@@ -53,7 +53,7 @@ var conAggLogFile string = ""
 var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
 
 // aggregateFile sets up tailing a log file to add to the aggregation file
-func aggregateFile(xname string) bool {
+func aggregateFile(config LogConfig, xname string) bool {
 	newFile := false
 	if _, ok := tailThreads[xname]; !ok {
 		// indicate we are starting to watch this one
@@ -63,7 +63,7 @@ func aggregateFile(xname string) bool {
 		tailThreads[xname] = &cancel
 
 		// record being tracked and forward log file contents
-		go watchConsoleLogFile(ctx, xname)
+		go watchConsoleLogFile(config, ctx, xname)
 	}
 	return newFile
 }
@@ -77,8 +77,8 @@ func StopTailing(xname string) {
 }
 
 // watchConsoleLogFile tails a console log file and writes to aggregation log
-func watchConsoleLogFile(ctx context.Context, xname string) {
-	filename := fmt.Sprintf("/var/log/conman/console.%s", xname)
+func watchConsoleLogFile(config LogConfig, ctx context.Context, xname string) {
+	filename := fmt.Sprintf("%s/console.%s", config.ConsoleLogPath, xname)
 	log.Printf("Setting up tail of %s", filename)
 
 	// set up a tail operation on the console file
@@ -158,10 +158,9 @@ func RespinAggLog() {
 }
 
 
-func AggregateFiles() {
-	nodes := nodes.CurrentNodes()
+func AggregateFiles(config LogConfig, nodes map[string]*types.NodeConsoleInfo) {
 	for xname := range nodes {
 		// make sure the node is being aggregated - no-op if already being done
-		aggregateFile(xname)
+		aggregateFile(config, xname)
 	}
 }

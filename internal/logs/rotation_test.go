@@ -1,0 +1,199 @@
+package logs
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+	"fmt"
+
+	"github.com/stretchr/testify/require"
+	"github.com/OpenCHAMI/remote-console/internal/types"
+
+)	
+
+func TestInitLogRotate(t *testing.T) {
+	tempDir := t.TempDir()
+
+	config := DefaultLogConfig()	
+	config.ConsoleLogPath = tempDir
+	config.ConsoleLogBackupPath = filepath.Join(tempDir, "backups")
+
+	InitLogRotate(config)
+
+	// Verify that the backup directory was created
+	_, err := os.Stat(config.ConsoleLogBackupPath)
+	require.NoError(t, err, "Backup directory should exist")
+}
+
+func TestUpdateLogRotateConf(t *testing.T) {
+	tempDir := t.TempDir()
+	conAggLogFile = "/tmp/consoleAgg-test.log"
+
+	config := DefaultLogConfig()
+	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")	
+
+	nodes := map[string]*types.NodeConsoleInfo{
+		"x0c0s1b0": { NodeName: "x0c0s1b0" },
+		"x0c0s1b1": { NodeName: "x0c0s1b1" },
+	}
+
+	UpdateLogRotateConf(config, nodes)
+
+	// Verify that the log rotation configuration file was created
+	data, err := os.ReadFile(config.LogRotateFilePath)
+	require.NoError(t, err, "Log rotation config file should exist")
+
+	logConfigContents := string(data)
+
+	expected := `# Auto-generated conman log rotation configuration file.
+/tmp/consoleAgg-test.log { 
+  nocompress
+  missingok
+  nocopytruncate
+  nocreate
+  nodelaycompress
+  nomail
+  notifempty
+  olddir /tmp
+  rotate 1
+  size=20M
+}
+/var/log/conman/console.x0c0s1b0 { 
+  nocompress
+  missingok
+  nocopytruncate
+  nocreate
+  nodelaycompress
+  nomail
+  notifempty
+  olddir /var/log/conman.old
+  rotate 2
+  size=5M
+}
+/var/log/conman/console.x0c0s1b1 { 
+  nocompress
+  missingok
+  nocopytruncate
+  nocreate
+  nodelaycompress
+  nomail
+  notifempty
+  olddir /var/log/conman.old
+  rotate 2
+  size=5M
+}
+
+`
+	require.Equal(t, expected, logConfigContents, "Log rotation config contents should match expected")
+}
+
+func TestReadLogRotTimestamps(t *testing.T) {
+	// Prepare a temporary log rotation timestamp file
+	tempDir := t.TempDir()
+	logRotTimestampsFile := filepath.Join(tempDir, "logrot.timestamps")
+
+	console1Timestamp := time.Date(2023, 11, 14, 12, 26, 40, 0, time.Local)
+	console2Timestamp := time.Date(2023, 11, 14, 12, 34, 60, 0, time.Local)
+
+	content := fmt.Sprintf(`# Log rotation timestamps
+"/var/log/conman/console.x0c0s1b0" %s
+"/var/log/conman/console.x0c0s1b1" %s
+`,  console1Timestamp.Format("2006-01-02-15:04:05"), console2Timestamp.Format("2006-01-02-15:04:05"))
+
+	config := DefaultLogConfig()
+	config.LogRotateStateFilePath = logRotTimestampsFile
+	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
+
+	err := os.WriteFile(logRotTimestampsFile, []byte(content), 0600)
+	require.NoError(t, err)
+
+	fileStamp := make(map[string]time.Time)
+	// Read the timestamps
+	conChanged, aggChanged := readLogRotTimestamps(config, fileStamp)
+	require.True(t, conChanged, "Console logs should show changes")
+	require.False(t, aggChanged, "Aggregation log should not show changes")
+
+	// Verify the contents
+	expected := map[string]time.Time{
+		"x0c0s1b0": console1Timestamp,
+		"x0c0s1b1": console2Timestamp,
+	}
+
+	require.Equal(t, expected, fileStamp, "Timestamps should match expected values")
+}	
+
+
+func TestRotateLogsOnce(t *testing.T) {
+	tempDir := t.TempDir()
+	logRotateStateFilePath := filepath.Join(tempDir, "logrot.state")
+	logBackupDir := filepath.Join(tempDir, "logbackups")
+	err := os.MkdirAll(logBackupDir, 0755)
+	require.NoError(t, err)
+
+
+	config := DefaultLogConfig()
+	config.LogRotateStateFilePath = logRotateStateFilePath
+	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
+	config.ConsoleLogPath = tempDir
+	config.ConsoleLogBackupPath = logBackupDir
+	config.ConsoleLogRotateEnabled = true
+	config.ConsoleLogFileSize = "1K" 
+
+	nodes := map[string]*types.NodeConsoleInfo{
+		"x0c0s1b0": { NodeName: "x0c0s1b0" },
+		"x0c0s1b1": { NodeName: "x0c0s1b1" },
+	}
+
+	UpdateLogRotateConf(config, nodes)
+
+
+	// Perform log rotation check
+	fileStamp := make(map[string]time.Time)
+	changed := rotateLogsOnce(config, fileStamp)
+	// TODO This is the current behavior, but seems wrong - should be false if no files exist?
+	require.True(t, changed, "Change should be detected")
+
+	changed = rotateLogsOnce(config, fileStamp)
+	require.False(t, changed, "Nothing should have changed")
+
+	// Now create some log files to trigger rotation
+	consoleLog1 := filepath.Join(config.ConsoleLogPath, "console.x0c0s1b0")
+	consoleLog2 := filepath.Join(config.ConsoleLogPath, "console.x0c0s1b1")
+
+	// Writ over 1KB of data to each log file
+	largeData := make([]byte, 2048)
+	for i := range largeData {
+		largeData[i] = 'A'
+	}
+
+	err = os.WriteFile(consoleLog1, largeData, 0600)
+	require.NoError(t, err)
+	err = os.WriteFile(consoleLog2, largeData, 0600)
+	require.NoError(t, err)
+
+	// Update timestamps to force rotation
+	fileStamp["x0c0s1b0"] = time.Now().Add(-2 * time.Hour)
+	fileStamp["x0c0s1b1"] = time.Now().Add(-2 * time.Hour)
+
+	// Perform log rotation check again
+	changed = rotateLogsOnce(config, fileStamp)
+	require.True(t, changed, "Log rotations should be detected")
+
+	// Verify that the log files have been rotated (moved to backup directory)
+	backupFiles, err := os.ReadDir(logBackupDir)
+	fmt.Println(backupFiles)
+	require.NoError(t, err)
+
+	var found1, found2 bool
+	for _, f := range backupFiles {
+		if f.Name() == "console.x0c0s1b0.1" {
+			found1 = true
+		}
+		if f.Name() == "console.x0c0s1b1.1" {
+			found2 = true
+		}
+	}
+	require.True(t, found1, "console.x0c0s1b0.1 should be in backup directory")
+	require.True(t, found2, "console.x0c0s1b1.1 should be in backup directory")
+}

@@ -1,10 +1,9 @@
 # UPDATE_CONFIG=TRUE
 SERVER keepalive=ON
-SERVER logdir="/var/log/"
+SERVER logdir="{{.LogFilesPath}}"
 SERVER logfile="conman.log"
 SERVER loopback=ON
-# TODO revert to /var/run after testing
-SERVER pidfile="/tmp/conman.pid"
+SERVER pidfile="{{.PidFilePath}}"
 SERVER resetcmd="powerman -0 %N; sleep 3; powerman -1 %N"
 SERVER timestamp=1h
 GLOBAL seropts="115200,8n1"
