@@ -5,6 +5,8 @@
 #  This will be used for integration testing
 networks:
   rcs:
+  rcs-rf:
+  rcs-console:
 
 services:
   # integration-tests:
@@ -35,11 +37,12 @@ services:
       - LOG_LEVEL=DEBUG
     depends_on:
       - smd
-      - x0c0s1b0
-      - x0c0s2b0
-      - x0c0s2b1
+      - ssh-password-server
+      - ssh-key-server
+      - ipmi-server
     networks:
       - rcs
+      - rcs-console
   vault:
     hostname: vault
     image: docker.io/library/vault:1.5.5
@@ -51,6 +54,7 @@ services:
       - IPC_LOCK
     networks:
       - rcs
+      - rcs-console
     ports:
       - "8200:8200"
   vault-kv-enabler:
@@ -118,6 +122,7 @@ services:
       - vault
     networks:
       - rcs
+      - rcs-rf
     ports:
       - "27779:27779"
   vault-key-loader:
@@ -146,87 +151,29 @@ services:
     command: >
       sh -c "apk add curl && sleep 10 &&
       curl -X POST -d '{\"RedfishEndpoints\":[{
+        \"ID\":\"x0c0s0b0\",
+        \"FQDN\":\"x0c0s0b0\",
+        \"RediscoverOnUpdate\":true,
+        \"User\":\"root\",
+        \"Password\":\"root_password\"
+      },{
         \"ID\":\"x0c0s1b0\",
         \"FQDN\":\"x0c0s1b0\",
-        \"RediscoverOnUpdate\":false,
-        \"User\":\"admin\",
-        \"Password\":\"admin\"
+        \"RediscoverOnUpdate\":true,
+        \"User\":\"root\",
+        \"Password\":\"root_password\"
       },{
         \"ID\":\"x0c0s2b0\",
         \"FQDN\":\"x0c0s2b0\",
-        \"RediscoverOnUpdate\":false,
-        \"User\":\"admin\",
-        \"Password\":\"admin\"
-      },{
-        \"ID\":\"x0c0s2b1\",
-        \"FQDN\":\"x0c0s2b1\",
-        \"RediscoverOnUpdate\":false,
-        \"User\":\"ADMIN\",
-        \"Password\":\"ADMIN\"}
+        \"RediscoverOnUpdate\":true,
+        \"User\":\"root\",
+        \"Password\":\"root_password\"}
       ]}' http://smd:27779/hsm/v2/Inventory/RedfishEndpoints"
     depends_on:
       - smd
     networks:
-      - rcs
-  component-loader:
-    image: library/golang:1.24-alpine
-    command: >
-      sh -c "apk add curl && sleep 10 &&
-      curl -X POST -H 'Content-Type: application/json' -d '{\"Components\":[{
-        \"ID\":\"x0c0s1b0n0\",
-        \"Type\":\"Node\",
-        \"State\":\"Ready\",
-        \"Flag\":\"OK\",
-        \"Enabled\":true,
-        \"Role\":\"Compute\",
-        \"Arch\":\"X86\"
-      },{
-        \"ID\":\"x0c0s2b0n0\",
-        \"Type\":\"Node\",
-        \"State\":\"Ready\",
-        \"Flag\":\"OK\",
-        \"Enabled\":true,
-        \"Role\":\"Compute\",
-        \"Arch\":\"X86\",
-        \"Class\": \"Mountain\"
-      },{
-        \"ID\":\"x0c0s2b1n0\",
-        \"Type\":\"Node\",
-        \"State\":\"Ready\",
-        \"Flag\":\"OK\",
-        \"Enabled\":true,
-        \"Role\":\"Compute\",
-        \"Arch\":\"X86\",
-        \"Class\": \"River\"
-      }]}' http://smd:27779/hsm/v2/State/Components &&
-      sleep 2 &&
-      curl -X POST -H 'Content-Type: application/json' -d '{
-        \"Hardware\":[{
-          \"ID\":\"x0c0s1b0n0\",
-          \"Type\":\"Node\",
-          \"Ordinal\":0,
-          \"Status\":\"Populated\",
-          \"HWInventoryByLocationType\":\"Node\",
-          \"NodeLocationInfo\":{
-            \"Id\":\"x0c0s1b0n0\",
-            \"Name\":\"node0\",
-            \"Hostname\":\"x0c0s1b0n0\",
-            \"Type\":\"Node\"
-          },
-          \"PopulatedFRU\":{
-            \"Type\":\"Node\",
-            \"NodeFRUInfo\":{
-              \"Model\":\"HPE Cray Supercomputing XD224\",
-              \"Manufacturer\":\"Foxconn\"
-            }
-          }
-        }]
-      }' http://smd:27779/hsm/v2/Inventory/Hardware"
-    depends_on:
-      - smd
-    networks:
-      - rcs
-  x0c0s1b0:
+      - rcs-rf
+  ssh-password-server:
     image: linuxserver/openssh-server:latest
     environment:
       - PUID=1000
@@ -236,20 +183,70 @@ services:
       - USER_PASSWORD=admin
     ports:
       - 2221:2222
-  x0c0s2b0:
+    networks:
+      rcs-console:
+        aliases:
+          - x0c0s0b0
+
+  ssh-key-server:
     image: linuxserver/openssh-server:latest
     environment:
       - PUID=1000
       - PGID=1000
       - USER_NAME=n0
-      - PUBLIC_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICLbSID9Js5EGIXtF9ggp2SpYEScL7MYpaXuZwNLRiNj cjh@openchami
+      - PUBLIC_KEY=${PUBLIC_KEY}
     ports:
       - 2222:2222
+    networks:
+      rcs-console:
+        aliases:
+          - x0c0s1b0
 
-  x0c0s2b1:
+  ipmi-server:
     build:
       context: ./ipmi_sim
     networks:
-      - rcs
+      rcs-console:
+        aliases:
+          - x0c0s2b0
     ports:
       - 623:623/udp
+
+  rfemulator0:
+    hostname: x0c0s0b0
+    image: ghcr.io/openchami/csm-rie:v1.6.7
+    environment:
+      - MOCKUPFOLDER=EX425
+      - MAC_SCHEMA=Mountain
+      - XNAME=x0c0s0b0
+      - PORT=443
+    networks:
+      rcs-rf:
+        aliases:
+          - x0c0s0b0
+
+  rfemulator1:
+    hostname: x0c0s1b0
+    image: ghcr.io/openchami/csm-rie:v1.6.7
+    environment:
+      - MOCKUPFOLDER=EX425
+      - MAC_SCHEMA=Mountain
+      - XNAME=x0c0s1b0
+      - PORT=443
+    networks:
+      rcs-rf:
+        aliases:
+          - x0c0s1b0
+
+  rfemulator2:
+    hostname: x0c0s2b0
+    image: ghcr.io/openchami/csm-rie:v1.6.7
+    environment:
+      - MOCKUPFOLDER=EX425
+      - MAC_SCHEMA=Mountain
+      - XNAME=x0c0s2b0
+      - PORT=443
+    networks:
+      rcs-rf:
+        aliases:
+          - x0c0s2b0
