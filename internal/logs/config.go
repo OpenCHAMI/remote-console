@@ -1,29 +1,28 @@
 package logs
 
 type LogConfig struct {
-	ConsoleLogRotateEnabled bool
-	ConsoleLogCheckFreqSec  int
-	ConsoleLogFileSize      string
-	ConsoleLogNumRotate     int
-	ConsoleLogPath          string
-	ConsoleLogBackupPath    string
-	AggLogFileSize          string
-	AggLogNumRotate         int
-	RotateCheckFrequency    int
-	LogRotateFilePath       string
-	LogRotateStateFilePath  string
+	ConsoleLogsFileSize      string  `desc:"Maximum size of console log files before rotation."`
+	ConsoleLogsNumRotate     int  `desc:"Number of rotated console log files to keep."`
+	ConsoleLogsPath          string `desc:"Path to console log files."`
+	ConsoleLogsBackupPath    string `desc:"Path to rotated console log files."`
+	AggLogsFileSize          string `desc:"Maximum size of aggregation log file before rotation."`
+	AggLogsNumRotate         int `desc:"Number of rotated aggregation log files to keep."`
+	LogRotateEnabled bool   `desc:"Enable log rotation."`
+	LogRotateCheckFrequency    int `desc:"Frequency in seconds to check for log rotation."`
+	LogRotateFilePath       string `desc:"Path to logrotate configuration file."`
+	LogRotateStateFilePath  string `desc:"Path to logrotate state file."`
 }
 
 func DefaultLogConfig() LogConfig {
 	return LogConfig{
-		ConsoleLogRotateEnabled: true,
-		ConsoleLogFileSize:      "5M",
-		ConsoleLogNumRotate:     2,
-		ConsoleLogPath:          "/var/log/conman",
-		ConsoleLogBackupPath:    "/var/log/conman.old",
-		AggLogFileSize:          "20M",
-		AggLogNumRotate:         1,
-		RotateCheckFrequency:    600,
+		LogRotateEnabled: true,
+		ConsoleLogsFileSize:      "5M",
+		ConsoleLogsNumRotate:     2,
+		ConsoleLogsPath:          "/var/log/conman",
+		ConsoleLogsBackupPath:    "/var/log/conman.old",
+		AggLogsFileSize:          "20M",
+		AggLogsNumRotate:         1,
+		LogRotateCheckFrequency:    600,
 		LogRotateFilePath:       "./logrotate.conman",
 		LogRotateStateFilePath:  "/tmp/rot_conman.state",
 	}

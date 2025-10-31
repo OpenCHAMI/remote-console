@@ -36,14 +36,37 @@ import (
 	sstorage "github.com/Cray-HPE/hms-securestorage"
 )
 
+type CredsService interface {
+	GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials
+	EnsureConsoleKeysPresent() (bool, error)
+	CheckForUpdates() (bool, error)
+}
+
+type credsService struct {
+	config CredsConfig
+	previousPasswords map[string]compcreds.CompCredentials
+	previousPrivateKeyHash []byte
+	previousCertHash []byte
+}
+
+
+func NewCredsService(config CredsConfig) CredsService {
+	return &credsService{	
+		config: config,
+		previousPasswords: nil,
+		previousPrivateKeyHash: nil,
+		previousCertHash: nil,
+	}
+}
+
 type CredsConfig struct {
-	DebugOnly            bool
-	SshConsoleKeyPath    string
-	SecureStorageAdapter StorageAdapter
-	VaultBasePath        string
-	VaultRole            string
-	LocalStoreFilePath   string
-	LocalStoreKey        string
+	DebugOnly            bool `flag:"-"`
+	SshConsoleKeyPath    string  `desc:"Path where the SSH private key file for console access will be writen to."`
+	SecureStorageAdapter StorageAdapter  `desc:"Type of secure storage adapter to use for credentials retrieval."`
+	VaultBasePath        string  `desc:"Base path in Vault where credentials are stored."`
+	VaultRole            string `desc:"Vault role to use when authenticating to Vault."`
+	LocalStoreFilePath   string `desc:"Path to local secure storage file."`
+	LocalStoreKey        string `desc:"Key to use for local secure storage decryption."`
 }
 
 func DefaultCredsConfig() CredsConfig {
@@ -86,20 +109,6 @@ func (s StorageAdapter) Validate() error {
 	}
 }
 
-// TODO can these be private?
-// Also where should the point to!
-//const SshConsoleKeyPath string = "/var/log/console/conman.key"
-//const SshConsoleKeyPubCertPath string = "/var/log/console/conman.key-cert.pub"
-
-var PreviousPrivateKeyHash []byte = nil
-var PreviousCertHash []byte = nil
-
-// TODO temp for refactor
-var DebugOnly bool = false
-
-// Internal state for password tracking
-var previousPasswords map[string]compcreds.CompCredentials = nil
-
 type sshKeys struct {
 	PrivateKey  string  `json:"privateKey"`
 	Certificate *string `json:"certificate"`
@@ -107,12 +116,12 @@ type sshKeys struct {
 
 // Look up the creds for the input endpoints with retries
 // TODO: I don't think we need this retry logic here any more?
-func GetPasswordsWithRetries(config CredsConfig, bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
+func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
 	var passwords map[string]compcreds.CompCredentials = nil
 	var err error = nil
 	for numTries := 0; numTries < maxTries; numTries++ {
 		log.Printf("Get passwords with retry: %d", numTries)
-		passwords, err = getPasswords(config, bmcXNames)
+		passwords, err = getPasswords(cs.config, bmcXNames)
 		if err != nil {
 			log.Printf("Error retrieving passwords: %v", err)
 		}
@@ -135,7 +144,7 @@ func GetPasswordsWithRetries(config CredsConfig, bmcXNames []string, maxTries, w
 	}
 	log.Printf("Maximum password attempts reached, configuring conman with what we have.")
 
-	previousPasswords = passwords
+	cs.previousPasswords = passwords
 
 	return passwords
 }
@@ -166,8 +175,7 @@ func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
 func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.CompCredentials, error) {
 	// NOTE: in update config thread
 	// if running in debug mode, skip hsm query
-	// TODO: DebugOnly should be passed in or imported from config
-	if DebugOnly {
+	if config.DebugOnly {
 		log.Print("DEBUGONLY mode - skipping creds query")
 		return nil, nil
 	}
@@ -194,14 +202,14 @@ func HashString(s string) ([]byte, error) {
 	return hasher.Sum(nil), nil
 }
 
-func EnsureConsoleKeysPresent(config CredsConfig) (bool, error) {
+func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 	retVal := false
-	if config.DebugOnly {
+	if cs.config.DebugOnly {
 		log.Print("Running in debug mode - skipping mountain cred generation")
 		return false, nil
 	}
 
-	ss, err := createSecureStorage(config)
+	ss, err := createSecureStorage(cs.config)
 	if err != nil {
 		return false, fmt.Errorf("unable to create secure storage adapter: %v", err)
 	}
@@ -214,10 +222,10 @@ func EnsureConsoleKeysPresent(config CredsConfig) (bool, error) {
 	newHash, err := HashString(consoleKeys.PrivateKey)
 	if err != nil {
 		return false, fmt.Errorf("failed to hash the private ssh key received from Vault. %v", err)
-	} else if PreviousPrivateKeyHash == nil || !(bytes.Equal(newHash, PreviousPrivateKeyHash)) {
+	} else if cs.previousPrivateKeyHash == nil || !(bytes.Equal(newHash, cs.previousPrivateKeyHash)) {
 		retVal = true
-		PreviousPrivateKeyHash = newHash
-		err = os.WriteFile(config.SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
+		cs.previousPrivateKeyHash = newHash
+		err = os.WriteFile(cs.config.SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
 		if err != nil {
 			return false, fmt.Errorf("failed to write our the private ssh key received from Vault. Err: %v", err)
 		}
@@ -230,10 +238,10 @@ func EnsureConsoleKeysPresent(config CredsConfig) (bool, error) {
 		newHash, err = HashString(*consoleKeys.Certificate)
 		if err != nil {
 			log.Printf("Error: Failed to hash the public ssh cert received from Vault. Err: %s", err)
-		} else if PreviousCertHash == nil || !(bytes.Equal(newHash, PreviousCertHash)) {
+		} else if cs.previousCertHash == nil || !(bytes.Equal(newHash, cs.previousCertHash)) {
 			retVal = true
-			PreviousCertHash = newHash
-			sshConsoleCertPath := config.SshConsoleKeyPath + "-cert.pub"
+			cs.previousCertHash = newHash
+			sshConsoleCertPath := cs.config.SshConsoleKeyPath + "-cert.pub"
 			err = os.WriteFile(sshConsoleCertPath, []byte(*consoleKeys.Certificate), 0644)
 			if err != nil {
 				return false, fmt.Errorf("failed to write our the public ssh cert %v", err)

@@ -18,7 +18,7 @@ type SignalConmanTERM func()
 var MonitorIntervalSecs int = 30
 
 // function to do check for credential changes and restart conman if necessary
-func CheckForUpdates(config CredsConfig) (bool, error) {
+func (cs *credsService) CheckForUpdates() (bool, error) {
 	restartConman := false
 
 	var xnames []string = nil
@@ -33,14 +33,14 @@ func CheckForUpdates(config CredsConfig) (bool, error) {
 		}
 	}
 
-	changed, err := checkIfKeysChanged(config)
+	changed, err := cs.checkIfKeysChanged()
 	if err != nil {
 		return false, err
 	}
 
 	restartConman = sshKeyAuth && changed
 
-	changed, err = checkIfPasswordsChanged(config, xnames)
+	changed, err = cs.checkIfPasswordsChanged(xnames)
 	if err != nil {
 		return false, err
 	}
@@ -50,12 +50,12 @@ func CheckForUpdates(config CredsConfig) (bool, error) {
 	return restartConman, nil
 }
 
-func checkIfPasswordsChanged(config CredsConfig, xnames []string) (bool, error) {
-	if previousPasswords == nil {
+func (cs *credsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
+	if cs.previousPasswords == nil {
 		fmt.Printf("No previous passwords stored, cannot check for changes\n")
 		return false, nil
 	}
-	currentPasswords, err := getPasswords(config, xnames)
+	currentPasswords, err := getPasswords(cs.config, xnames)
 
 	if err != nil {
 		log.Printf("Error retrieving passwords while checking for credential changes: %v", err)
@@ -67,7 +67,7 @@ func checkIfPasswordsChanged(config CredsConfig, xnames []string) (bool, error) 
 			log.Printf("Missing credentials detected for %s while checking for credential changes", xname)
 			continue
 		}
-		previousCreds, _ := previousPasswords[xname]
+		previousCreds, _ := cs.previousPasswords[xname]
 
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
 			log.Printf("Change detected in the passwords.  Conman will be reconfigured.")
@@ -78,6 +78,6 @@ func checkIfPasswordsChanged(config CredsConfig, xnames []string) (bool, error) 
 	return false, nil
 }
 
-func checkIfKeysChanged(config CredsConfig) (bool, error) {
-	return EnsureConsoleKeysPresent(config)
+func (cs *credsService) checkIfKeysChanged() (bool, error) {
+	return cs.EnsureConsoleKeysPresent()
 }

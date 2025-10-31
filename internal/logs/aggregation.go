@@ -77,7 +77,7 @@ func StopTailing(xname string) {
 
 // watchConsoleLogFile tails a console log file and writes to aggregation log
 func watchConsoleLogFile(config LogConfig, ctx context.Context, xname string) {
-	filename := fmt.Sprintf("%s/console.%s", config.ConsoleLogPath, xname)
+	filename := fmt.Sprintf("%s/console.%s", config.ConsoleLogsPath, xname)
 	log.Printf("Setting up tail of %s", filename)
 
 	// set up a tail operation on the console file

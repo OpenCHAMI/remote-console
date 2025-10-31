@@ -151,18 +151,6 @@ services:
     command: >
       sh -c "apk add curl && sleep 10 &&
       curl -X POST -d '{\"RedfishEndpoints\":[{
-        \"ID\":\"x0c0s0b0\",
-        \"FQDN\":\"x0c0s0b0\",
-        \"RediscoverOnUpdate\":true,
-        \"User\":\"root\",
-        \"Password\":\"root_password\"
-      },{
-        \"ID\":\"x0c0s1b0\",
-        \"FQDN\":\"x0c0s1b0\",
-        \"RediscoverOnUpdate\":true,
-        \"User\":\"root\",
-        \"Password\":\"root_password\"
-      },{
         \"ID\":\"x0c0s2b0\",
         \"FQDN\":\"x0c0s2b0\",
         \"RediscoverOnUpdate\":true,

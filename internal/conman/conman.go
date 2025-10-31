@@ -26,16 +26,26 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
-var conmanMutex = &sync.Mutex{}
-var command *exec.Cmd = nil
+type ConmanService interface {
+	ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error)
+	ExecuteConman() error
+	SignalConmanTERM()
+	SignalConmanHUP()
+}
+
+type conmanService struct{
+	config ConmanConfig
+	mutex sync.Mutex
+	command *exec.Cmd
+}
 
 type ConmanConfig struct {
-	DebugOnly          bool
-	BaseConfFilePath   string
-	ConfFilePath       string
-	LogFilesPath       string
-	PidFilePath        string
-	ConsoleScriptsPath string
+	DebugOnly          bool `flag:"-"`
+	BaseConfFilePath   string  `desc:"Path to the base conman configuration template file."`
+	ConfFilePath       string `desc:"Path to the generated conman configuration file."`
+	LogsPath       string `desc:"Path to conman log files."`
+	PidFilePath        string `desc:"Path to the conman PID file."`
+	ConsoleScriptsPath string `desc:"Path to console helper scripts."`
 }
 
 func DefaultConmanConfig() ConmanConfig {
@@ -43,17 +53,25 @@ func DefaultConmanConfig() ConmanConfig {
 		DebugOnly:          false,
 		BaseConfFilePath:   "/app/conman_base.conf.tmpl",
 		ConfFilePath:       "/etc/conman.conf",
-		LogFilesPath:       "/var/log/conman",
+		LogsPath:       "/var/log/conman",
 		PidFilePath:        "/var/run/conman.pid",
 		ConsoleScriptsPath: "/usr/bin",
 	}
 }
 
-func ConfigureConman(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error) {
-	conmanMutex.Lock()
-	defer conmanMutex.Unlock()
+func NewConmanService(config ConmanConfig) ConmanService {
+	return &conmanService{
+		config: config,
+		mutex: sync.Mutex{},
+		command: nil,
+	}
+}
 
-	return updateConfigFile(config, nodes, passwords, true)
+func (cs *conmanService) ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error) {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+
+	return cs.updateConfigFile(nodes, passwords, true)
 }
 
 func generateBaseConfig(config ConmanConfig) ([]byte, error) {
@@ -79,10 +97,10 @@ func generateBaseConfig(config ConmanConfig) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
+func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
 	log.Print("Updating the configuration file")
 
-	bs, err := generateBaseConfig(config)
+	bs, err := generateBaseConfig(cs.config)
 	if err != nil {
 		return false, fmt.Errorf("Unable to template base config file: %v", err)
 	}
@@ -92,8 +110,8 @@ func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleIn
 		return false, nil
 	}
 
-	log.Printf("Opening conman configuration file for output: %s", config.ConfFilePath)
-	cf, err := os.OpenFile(config.ConfFilePath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
+	log.Printf("Opening conman configuration file for output: %s", cs.config.ConfFilePath)
+	cf, err := os.OpenFile(cs.config.ConfFilePath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return false, fmt.Errorf("Unable to open config file to write: %v", err)
 	}
@@ -125,15 +143,15 @@ func updateConfigFile(config ConmanConfig, nodes map[string]*types.NodeConsoleIn
 				log.Printf("No creds record returned for %s", nci.BmcName)
 			}
 			log.Printf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %s REDACTED\"\n",
-				nci.NodeName, config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username)
+				nci.NodeName, cs.config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username)
 			output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %s %s\"\n",
-				nci.NodeName, config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username, creds.Password)
+				nci.NodeName, cs.config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username, creds.Password)
 			consoles = append(consoles, output)
 		} else if nci.IsKeySSH() {
 			log.Printf("console name=\"%s\" dev=\"%s/ssh-key-console %s\"\n",
-				nci.NodeName, config.ConsoleScriptsPath, nci.NodeName)
+				nci.NodeName, cs.config.ConsoleScriptsPath, nci.NodeName)
 			output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-key-console %s\"\n",
-				nci.NodeName, config.ConsoleScriptsPath, nci.NodeName)
+				nci.NodeName, cs.config.ConsoleScriptsPath, nci.NodeName)
 			consoles = append(consoles, output)
 		}
 	}
@@ -170,27 +188,27 @@ func willUpdateConfig(baseConfig []byte) bool {
 }
 
 // SignalConmanTERM sends SIGTERM to running conmand process
-func SignalConmanTERM() {
-	if command != nil {
+func (cs *conmanService) SignalConmanTERM() {
+	if cs.command != nil {
 		log.Print("Signaling conman with SIGTERM")
-		command.Process.Signal(syscall.SIGTERM)
+		cs.command.Process.Signal(syscall.SIGTERM)
 	} else {
 		log.Print("Warning: Attempting to signal conman process when nil.")
 	}
 }
 
 // SignalConmanHUP sends SIGHUP to running conmand process
-func SignalConmanHUP(config ConmanConfig) {
-	if command != nil {
+func (cs *conmanService) SignalConmanHUP() {
+	if cs.command != nil {
 		log.Print("Signaling conman with SIGHUP")
-		command.Process.Signal(syscall.SIGHUP)
+		cs.command.Process.Signal(syscall.SIGHUP)
 	} else {
 		log.Print("Warning: Attempting to signal conman process when nil.")
 
-		if config.DebugOnly && nodes.CurrentNodes() != nil {
+		if cs.config.DebugOnly && nodes.CurrentNodes() != nil {
 			log.Printf("Respinning current log test files...")
 			for _, nci := range nodes.CurrentNodes() {
-				go createTestLogFile(config, nci.NodeName, true)
+				go cs.createTestLogFile(nci.NodeName, true)
 			}
 		}
 	}
@@ -211,42 +229,42 @@ func logPipeOutput(readPipe *io.ReadCloser, desc string) {
 	}
 }
 
-func ExecuteConman(config ConmanConfig) error {
+func (cs *conmanService) ExecuteConman() error {
 	log.Print("Starting a new instance of conmand")
-	if command != nil {
+	if cs.command != nil {
 		return fmt.Errorf("command not nil on entry to executeConman!!")
 	}
-	command = exec.Command("conmand", "-F", "-v", "-c", config.ConfFilePath)
-	cmdStdErr, err := command.StderrPipe()
+	cs.command = exec.Command("conmand", "-F", "-v", "-c", cs.config.ConfFilePath)
+	cmdStdErr, err := cs.command.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("Unable to connect to conmand stderr pipe: %s", err)
 	}
-	cmdStdOut, err := command.StdoutPipe()
+	cmdStdOut, err := cs.command.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("Unable to connect to conmand stdout pipe: %s", err)
 	}
 	go logPipeOutput(&cmdStdErr, "stderr")
 	go logPipeOutput(&cmdStdOut, "stdout")
 	log.Print("Starting conmand process")
-	if err = command.Start(); err != nil {
+	if err = cs.command.Start(); err != nil {
 		return fmt.Errorf("Unable to start the command: %s", err)
 	}
-	if err = command.Wait(); err != nil {
+	if err = cs.command.Wait(); err != nil {
 		log.Printf("Error from command wait: %s", err)
 		time.Sleep(15 * time.Second)
 	}
-	command = nil
+	cs.command = nil
 	log.Print("Conmand process has exited")
 
 	return nil
 }
 
 // DEBUG Function to create and add to a fake log file
-func createTestLogFile(config ConmanConfig, xname string, respin bool) {
+func (cs *conmanService) createTestLogFile(xname string, respin bool) {
 	// NOTE: this function is only for use in a debug environment where there
 	//  are no real console connections present.
 	sleepTime := 1 * time.Second
-	filename := fmt.Sprintf("%s/console.%s", config.LogFilesPath, xname)
+	filename := fmt.Sprintf("%s/console.%s", cs.config.LogsPath, xname)
 
 	// Ff respin is true, only create if the file is not present - meant to
 	// be used when a logrotation has moved the original file and we need to

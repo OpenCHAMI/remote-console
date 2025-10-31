@@ -43,7 +43,15 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	config.LocalStoreFilePath = localStoreFilePath
 	config.LocalStoreKey = localStoreKey
 
-	changed, err := checkIfPasswordsChanged(config, nodes)
+	service := NewCredsService(config)
+
+	// Cast to credsService to access previousPasswords
+	cs, ok := service.(*credsService)
+	if !ok {
+		t.Fatalf("Failed to cast CredsService to credsService")
+	}
+
+	changed, err := cs.checkIfPasswordsChanged(nodes)
 	if err != nil {
 		t.Fatalf("Error checking if passwords changed: %v", err)
 	}
@@ -51,7 +59,7 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	require.False(t, changed, "Passwords should not have changed")
 
 	// Call GetPasswordsWithRetry to set previousPasswords
-	GetPasswordsWithRetries(config, nodes, 3, 1)
+	service.GetPasswordsWithRetries(nodes, 3, 1)
 
 	// Now change a password
 	value := map[string]string{
@@ -63,7 +71,7 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	err = ss.Store("hms-creds/x0c0s1b0", value)
 	require.NoError(t, err)
 
-	changed, err = checkIfPasswordsChanged(config, nodes)
+	changed, err = cs.checkIfPasswordsChanged(nodes)
 	if err != nil {
 		t.Fatalf("Error checking if passwords changed: %v", err)
 	}
@@ -95,12 +103,20 @@ func TestCheckIfKeysChanged(t *testing.T) {
 	config.LocalStoreKey = localStoreKey
 	config.SshConsoleKeyPath = filepath.Join(tempDir, "conman.key")
 
-	changed, err := checkIfKeysChanged(config)
+	service := NewCredsService(config)
+
+	// Cast to credsService to access EnsureConsoleKeysPresent
+	cs, ok := service.(*credsService)
+	if !ok {
+		t.Fatalf("Failed to cast CredsService to credsService")
+	}
+
+	changed, err := cs.checkIfKeysChanged()
 	require.NoError(t, err)
 	require.True(t, changed, "Keys should be considered changed on first check")
 
 	// Check again without changing keys
-	changed, err = checkIfKeysChanged(config)
+	changed, err = cs.checkIfKeysChanged()
 	require.NoError(t, err)
 	require.False(t, changed, "Keys should not have changed")
 
@@ -112,7 +128,7 @@ func TestCheckIfKeysChanged(t *testing.T) {
 	err = ss.Store(consoleKeysPath, value)
 	require.NoError(t, err)
 
-	changed, err = checkIfKeysChanged(config)
+	changed, err = cs.checkIfKeysChanged()
 	require.NoError(t, err)
 	require.True(t, changed, "Keys should have changed after update")
 }

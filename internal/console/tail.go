@@ -18,15 +18,17 @@ type consoleTailSession struct {
 	tail   *tail.Tail
 	ctx    context.Context
 	cancel context.CancelFunc
+	consoleLogsPath string
 }
 
-func newConsoleTailSession(ctx context.Context, nodeID string, conn *websocket.Conn) *consoleTailSession {
+func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID string, conn *websocket.Conn) *consoleTailSession {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	return &consoleTailSession{
 		nodeID: nodeID,
 		conn:   conn,
 		ctx:    sessionCtx,
 		cancel: cancel,
+		consoleLogsPath: consoleLogsPath,
 	}
 }
 
@@ -139,8 +141,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		conf.Location = &tail.SeekInfo{Offset: int64(-1 * numLines), Whence: io.SeekEnd}
 	}
 
-	// TODO allow this prefix to be configurable, I think we can pass it to conmand
-	filename := fmt.Sprintf("/var/log/conman/console.%s", cts.nodeID)
+	filename := fmt.Sprintf("%s/console.%s", cts.consoleLogsPath, cts.nodeID)
 	var err error
 	cts.tail, err = tail.TailFile(filename, conf)
 	if err != nil {
@@ -154,7 +155,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	cts.streamConsoleTail(follow)
 }
 
-func doTailConsole(w http.ResponseWriter, r *http.Request) {
+func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Make sure the request is cleaned up
@@ -211,7 +212,7 @@ func doTailConsole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// From here on, errors must be sent via WebSocket close frames
-	session := newConsoleTailSession(ctx, nodeID, conn)
+	session := newConsoleTailSession(ctx, consoleLogsPath, nodeID, conn)
 	if session == nil {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console tail session"))

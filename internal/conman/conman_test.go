@@ -87,9 +87,10 @@ func TestConfigureConman(t *testing.T) {
 			Password: "password3",
 		},
 	}
+	service := NewConmanService(config)
 
 	// First call should create the config file
-	updated, err := ConfigureConman(config, nodes, passwords)
+	updated, err := service.ConfigureConman(nodes, passwords)
 	require.NoError(t, err)
 	require.True(t, updated)
 

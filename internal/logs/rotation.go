@@ -49,7 +49,7 @@ func InitLogRotate(config LogConfig) {
 	defer logMutex.Unlock()
 
 	// Set up the 'backups' directory for logrotation to use
-	utils.EnsureDirPresent(config.ConsoleLogBackupPath, 0755)
+	utils.EnsureDirPresent(config.ConsoleLogsBackupPath, 0755)
 }
 
 // UpdateLogRotateConf updates the log rotation configuration file
@@ -77,7 +77,7 @@ func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleIn
 	if conAggLogFile != "" {
 		conAggLogDir := filepath.Dir(conAggLogFile)
 		if len(conAggLogDir) > 0 {
-			writeConfigEntry(lrf, conAggLogFile, conAggLogDir, config.AggLogNumRotate, config.AggLogFileSize)
+			writeConfigEntry(lrf, conAggLogFile, conAggLogDir, config.AggLogsNumRotate, config.AggLogsFileSize)
 		} else {
 			log.Printf("Invalid aggregation file name/dir, not added to log rotation: %s, %s", conAggLogFile, conAggLogDir)
 		}
@@ -88,8 +88,8 @@ func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleIn
 	for _, cni := range nodes {
 		log.Printf("cni")
 		xname := cni.NodeName
-		fn := filepath.Join(config.ConsoleLogPath, fmt.Sprintf("console.%s", xname))
-		writeConfigEntry(lrf, fn, config.ConsoleLogBackupPath, config.ConsoleLogNumRotate, config.ConsoleLogFileSize)
+		fn := filepath.Join(config.ConsoleLogsPath, fmt.Sprintf("console.%s", xname))
+		writeConfigEntry(lrf, fn, config.ConsoleLogsBackupPath, config.ConsoleLogsNumRotate, config.ConsoleLogsFileSize)
 	}
 
 	fmt.Fprintln(lrf, "")
@@ -118,7 +118,7 @@ func parseTimestamp(config LogConfig, line string) (string, time.Time, bool, boo
 	isCon := false
 	isAgg := false
 
-	filePrefix := filepath.Join(config.ConsoleLogPath, "console.")
+	filePrefix := filepath.Join(config.ConsoleLogsPath, "console.")
 	timeStampStr := ""
 	pos := strings.Index(line, filePrefix)
 	nodeStPos := 0
@@ -208,7 +208,7 @@ func LogRotate(config LogConfig) bool {
 	fileStamp := make(map[string]time.Time)
 	readLogRotTimestamps(config, fileStamp)
 
-	if config.ConsoleLogRotateEnabled {
+	if config.LogRotateEnabled {
 		consoleLogChanged = rotateLogsOnce(config, fileStamp)
 	}
 

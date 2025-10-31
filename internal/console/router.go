@@ -57,7 +57,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func SetupRoutes() {
+func SetupRoutes(consoleLogsPath string) {
 	// k8s routes
 	RequestRouter.Get("/remote-console/liveness", doLiveness)
 	RequestRouter.Get("/remote-console/readiness", doReadiness)
@@ -65,7 +65,9 @@ func SetupRoutes() {
 
 	// WebSocket console access endpoints
 	// These handle their own errors via WebSocket close frames after upgrade
-	RequestRouter.Get("/remote-console/console/{nodeID}/tail", doTailConsole)
+	RequestRouter.Get("/remote-console/console/{nodeID}/tail", func(w http.ResponseWriter, r *http.Request) {
+		doTailConsole(consoleLogsPath, w, r)
+	})
 	RequestRouter.Get("/remote-console/console/{nodeID}", doInteractiveConsole)
 
 	// debug only routes
