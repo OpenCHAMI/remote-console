@@ -34,34 +34,45 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/OpenCHAMI/remote-console/internal/types"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
-var logMutex = &sync.Mutex{}
+
+
+
+
+
 
 // LogRotate initializes and starts log rotation
-func InitLogRotate(config LogConfig) {
-	logMutex.Lock()
-	defer logMutex.Unlock()
+func (ls *logsService) initLogRotate() error {
+	fmt.Printf("InitLogRotate: Setting up log rotation\n")
+	ls.mutex.Lock()
+	defer ls.mutex.Unlock()
+	fmt.Printf("InitLogRotate: after Setting up log rotation\n")
 
 	// Set up the 'backups' directory for logrotation to use
-	utils.EnsureDirPresent(config.ConsoleLogsBackupPath, 0755)
+	fmt.Printf("Ensuring console log backup directory present: %s\n", ls.config.ConsoleLogsBackupPath)
+	err := utils.EnsureDirPresent(ls.config.ConsoleLogsBackupPath, 0755)
+	if err != nil {
+		return fmt.Errorf("error ensuring console logs backup directory: %v", err)
+	}
+
+	return nil
 }
 
 // UpdateLogRotateConf updates the log rotation configuration file
-func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleInfo) {
+func (ls *logsService) UpdateLogRotateConf(nodes map[string]*types.NodeConsoleInfo) {
 	log.Printf("before log mutex")
-	logMutex.Lock()
-	defer logMutex.Unlock()
+	ls.mutex.Lock()
+	defer ls.mutex.Unlock()
 	log.Printf("LOG ROTATE: after")
 
 	// Open the file for writing
-	log.Printf("LOG ROTATE: Opening conman log rotation configuration fillle for output: %s", config.LogRotateFilePath)
-	lrf, err := os.Create(config.LogRotateFilePath)
+	log.Printf("LOG ROTATE: Opening conman log rotation configuration fillle for output: %s", ls.config.LogRotateFilePath)
+	lrf, err := os.Create(ls.config.LogRotateFilePath)
 	if err != nil {
 		log.Printf("Unable to open config file to write: %s", err)
 		return
@@ -77,7 +88,7 @@ func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleIn
 	if conAggLogFile != "" {
 		conAggLogDir := filepath.Dir(conAggLogFile)
 		if len(conAggLogDir) > 0 {
-			writeConfigEntry(lrf, conAggLogFile, conAggLogDir, config.AggLogsNumRotate, config.AggLogsFileSize)
+			writeConfigEntry(lrf, conAggLogFile, conAggLogDir, ls.config.AggLogsNumRotate, ls.config.AggLogsFileSize)
 		} else {
 			log.Printf("Invalid aggregation file name/dir, not added to log rotation: %s, %s", conAggLogFile, conAggLogDir)
 		}
@@ -88,8 +99,8 @@ func UpdateLogRotateConf(config LogConfig, nodes map[string]*types.NodeConsoleIn
 	for _, cni := range nodes {
 		log.Printf("cni")
 		xname := cni.NodeName
-		fn := filepath.Join(config.ConsoleLogsPath, fmt.Sprintf("console.%s", xname))
-		writeConfigEntry(lrf, fn, config.ConsoleLogsBackupPath, config.ConsoleLogsNumRotate, config.ConsoleLogsFileSize)
+		fn := filepath.Join(ls.config.ConsoleLogsPath, fmt.Sprintf("console.%s", xname))
+		writeConfigEntry(lrf, fn, ls.config.ConsoleLogsBackupPath, ls.config.ConsoleLogsNumRotate, ls.config.ConsoleLogsFileSize)
 	}
 
 	fmt.Fprintln(lrf, "")
@@ -168,6 +179,14 @@ func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (con
 	defer sf.Close()
 
 	er := bufio.NewReader(sf)
+
+	// Read the logrotate state -- version 2 line
+	_, err = er.ReadString('\n')
+	if err != nil {
+		log.Printf("Unable to read log rotation state file %s: %s", config.LogRotateStateFilePath, err)
+		return false, false
+	}
+
 	for {
 		line, err := er.ReadString('\n')
 		if err != nil {
@@ -203,19 +222,22 @@ func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (con
 }
 
 // LogRotate performs a log rotation check and rotation if needed
-func LogRotate(config LogConfig) bool {
+func (ls *logsService) LogRotate() bool {
+	ls.mutex.Lock()
+	defer ls.mutex.Unlock()
+
 	consoleLogChanged := false
 	fileStamp := make(map[string]time.Time)
-	readLogRotTimestamps(config, fileStamp)
+	readLogRotTimestamps(ls.config, fileStamp)
 
-	if config.LogRotateEnabled {
-		consoleLogChanged = rotateLogsOnce(config, fileStamp)
+	if ls.config.LogRotateEnabled {
+		consoleLogChanged = ls.rotateLogsOnce(ls.config, fileStamp)
 	}
 
 	return consoleLogChanged
 }
 
-func rotateLogsOnce(config LogConfig, fileStamp map[string]time.Time) bool {
+func (ls *logsService) rotateLogsOnce(config LogConfig, fileStamp map[string]time.Time) bool {
 	conChanged := false
 	aggChanged := false
 	log.Print("LOG ROTATE: Starting logrotate")
@@ -236,7 +258,7 @@ func rotateLogsOnce(config LogConfig, fileStamp map[string]time.Time) bool {
 		time.Sleep(5 * time.Second)
 
 		if aggChanged {
-			RespinAggLog()
+			ls.respinAggLog()
 		}
 	} else {
 		log.Print("LOG ROTATE: No log files changed with logrotate")

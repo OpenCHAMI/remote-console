@@ -70,13 +70,20 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	defer lf.Close()
 
 	config := DefaultLogConfig()
-	config.ConsoleLogPath = tempDir
+	config.ConsoleLogsPath = tempDir
 
 	// Start watching the console log file
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go watchConsoleLogFile(config, ctx, testXname)
+	service := NewLogsService(config)
+	// Cast to credsService to access previousPasswords
+	logsService, ok := service.(*logsService)
+	if !ok {
+		t.Fatalf("Failed to cast CredsService to credsService")
+	}
+
+	go logsService.watchConsoleLogFile(ctx, testXname)
 
 	// Write some lines to the console log file
 	testLines := []string{
@@ -132,7 +139,7 @@ func TestAggregateFiles(t *testing.T) {
 	}
 
 	config := DefaultLogConfig()
-	config.ConsoleLogPath = tempDir
+	config.ConsoleLogsPath = tempDir
 
 	// Prepare node console info map
 	nodes := make(map[string]*types.NodeConsoleInfo)
@@ -142,8 +149,9 @@ func TestAggregateFiles(t *testing.T) {
 		}
 	}
 
+	service := NewLogsService(config)
 	// Start aggregating files
-	AggregateFiles(config, nodes)
+	service.AggregateFiles(nodes)
 
 	// Write some lines to the console log files
 	testLines := map[string][]string{
@@ -184,8 +192,15 @@ func TestRespinAggLog(t *testing.T) {
 	// Set up aggregation log file path
 	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
 
+	service := NewLogsService(DefaultLogConfig())
+	// Cast to credsService to access respinAggLog
+	logsService, ok := service.(*logsService)
+	if !ok {
+		t.Fatalf("Failed to cast CredsService to credsService")
+	}
+
 	// First respin
-	RespinAggLog()
+	logsService.respinAggLog()
 	require.NotNil(t, conAggLogger)
 
 	// Write a test line
@@ -195,7 +210,7 @@ func TestRespinAggLog(t *testing.T) {
 	firstLogger := conAggLogger
 
 	// Respin again
-	RespinAggLog()
+	logsService.respinAggLog()
 	require.NotNil(t, conAggLogger)
 
 	// Ensure the logger pointer has changed

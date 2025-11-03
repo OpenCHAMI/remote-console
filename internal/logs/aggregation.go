@@ -43,8 +43,8 @@ import (
 var conAggMutex = &sync.Mutex{}
 var conAggLogger *log.Logger = nil
 
-// Globals to build up the aggregation file name for this pod
-const conAggLogFileBase string = "/tmp/consoleAgg/consoleAgg-"
+
+
 
 var conAggLogFile string = ""
 
@@ -52,7 +52,7 @@ var conAggLogFile string = ""
 var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
 
 // aggregateFile sets up tailing a log file to add to the aggregation file
-func aggregateFile(config LogConfig, xname string) bool {
+func (ls *logsService) aggregateFile(xname string) bool {
 	newFile := false
 	if _, ok := tailThreads[xname]; !ok {
 		// indicate we are starting to watch this one
@@ -62,7 +62,7 @@ func aggregateFile(config LogConfig, xname string) bool {
 		tailThreads[xname] = &cancel
 
 		// record being tracked and forward log file contents
-		go watchConsoleLogFile(config, ctx, xname)
+		go ls.watchConsoleLogFile(ctx, xname)
 	}
 	return newFile
 }
@@ -76,8 +76,8 @@ func StopTailing(xname string) {
 }
 
 // watchConsoleLogFile tails a console log file and writes to aggregation log
-func watchConsoleLogFile(config LogConfig, ctx context.Context, xname string) {
-	filename := fmt.Sprintf("%s/console.%s", config.ConsoleLogsPath, xname)
+func (ls *logsService) watchConsoleLogFile(ctx context.Context, xname string) {
+	filename := fmt.Sprintf("%s/console.%s", ls.config.ConsoleLogsPath, xname)
 	log.Printf("Setting up tail of %s", filename)
 
 	// set up a tail operation on the console file
@@ -118,7 +118,7 @@ func writeToAggLog(xname, line string) {
 }
 
 // RespinAggLog reopens the aggregation log file (after rotation)
-func RespinAggLog() {
+func (ls *logsService) respinAggLog() {
 	conAggMutex.Lock()
 	defer conAggMutex.Unlock()
 
@@ -129,7 +129,7 @@ func RespinAggLog() {
 			log.Printf("Error getting hostname:%s", err)
 			hostname = "unknown"
 		}
-		conAggLogFile = fmt.Sprintf("%s%s.log", conAggLogFileBase, hostname)
+		conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log",ls.config.AggLogsPath, hostname)
 	}
 
 	// ensure the directory exists
@@ -156,9 +156,12 @@ func RespinAggLog() {
 	conAggLogger.Print("Starting aggregation log")
 }
 
-func AggregateFiles(config LogConfig, nodes map[string]*types.NodeConsoleInfo) {
+func (ls *logsService) AggregateFiles(nodes map[string]*types.NodeConsoleInfo) {
+	fmt.Printf("AggregateFiles: Starting aggregation of console log files\n")
+	fmt.Printf("AggregateFiles: Starting aggregation of console log files: %d\n", len(nodes))
+
 	for xname := range nodes {
 		// make sure the node is being aggregated - no-op if already being done
-		aggregateFile(config, xname)
+		ls.aggregateFile(xname)
 	}
 }

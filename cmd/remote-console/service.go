@@ -19,7 +19,7 @@ import (
 
 
 // Watch for node updates and signal conman and log rotation as needed
-func watchForNodesUpdates(cfg config, conmanService conman.ConmanService) {
+func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.ConmanService, logsService logs.LogsService) {
 	if conmanService == nil {
 		log.Panicf("Conman service is nil")
 	}
@@ -30,7 +30,7 @@ func watchForNodesUpdates(cfg config, conmanService conman.ConmanService) {
 			log.Printf("Info: Exiting node watch loop due to shutdown")
 			return
 		}
-		changed := nodes.CheckForUpdates(cfg.SmdURL)
+		changed := nodes.CheckForUpdates(config.SmdURL)
 
 		if changed {
 			log.Printf("Info: Node changes detected, signaling conman to restart")
@@ -40,21 +40,21 @@ func watchForNodesUpdates(cfg config, conmanService conman.ConmanService) {
 
 			// also update log rotation configuration
 			log.Printf("Info: Node changes detected, updating log rotation configuration")
-			logs.UpdateLogRotateConf(cfg.Log, nodes)
+			logsService.UpdateLogRotateConf(nodes)
 
 			// make sure we are aggregating any new console log files
 			log.Printf("Info: Node changes detected, updating log aggregation configuration")
-			logs.AggregateFiles(cfg.Log, nodes)
+			logsService.AggregateFiles(nodes)
 		}
 
 		// Wait for the correct polling interval
-		time.Sleep(time.Duration(cfg.NewNodeLookup) * time.Second)
+		time.Sleep(time.Duration(config.NewNodeLookup) * time.Second)
 	}
 }
 
 // Watch for credential updates and signal conman as needed
-func watchForCredUpdates(cfg config,credsService creds.CredsService, conmanService conman.ConmanService) {
-	time.Sleep(time.Duration(cfg.CredsMonitorInterval) * time.Second)
+func watchForCredUpdates(config remoteConsoleConfig,credsService creds.CredsService, conmanService conman.ConmanService) {
+	time.Sleep(time.Duration(config.CredsMonitorInterval) * time.Second)
 	for {
 		changed, err := credsService.CheckForUpdates()
 		if err != nil {
@@ -66,22 +66,21 @@ func watchForCredUpdates(cfg config,credsService creds.CredsService, conmanServi
 			conmanService.SignalConmanTERM()
 		}
 
-		time.Sleep(time.Duration(cfg.CredsMonitorInterval) * time.Second)
+		time.Sleep(time.Duration(config.CredsMonitorInterval) * time.Second)
 	}
 }
 
 // Log rotation setup and loop
-func logRotate(cfg config, conmanService conman.ConmanService) {
-	logConfig := cfg.Log
+func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService , logsService logs.LogsService) {
+	logConfig := config.Log
 	// log the log rotation parameters
 	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logConfig.LogRotateEnabled, logConfig.LogRotateCheckFrequency)
 	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logConfig.ConsoleLogsFileSize, logConfig.ConsoleLogsNumRotate)
 	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logConfig.AggLogsFileSize, logConfig.AggLogsNumRotate)
 
-	// Init log rotation
-	logs.InitLogRotate(logConfig)
+
 	// Create the log rotation configuration file
-	logs.UpdateLogRotateConf(logConfig, nodes.CurrentNodes())
+	logsService.UpdateLogRotateConf(nodes.CurrentNodes())
 
 	sleepSecs := time.Duration(300) * time.Second
 	logRotCheckFreqSec := logConfig.LogRotateCheckFrequency
@@ -92,7 +91,7 @@ func logRotate(cfg config, conmanService conman.ConmanService) {
 	}
 
 	for {
-		restartConman := logs.LogRotate(logConfig)
+		restartConman := logsService.LogRotate()
 		if restartConman {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
 			conmanService.SignalConmanHUP()
@@ -139,22 +138,22 @@ func runConman(debug bool, conmanService conman.ConmanService, credService creds
 	}
 }
 
-func runService(cfg config) error{
+func runService(config remoteConsoleConfig) error{
 
 	log.Printf("Remote console service starting")
 	// Set up the zombie killer
 	log.Printf("Starting zombie killer...")
 	go conman.WatchForZombies()
 
-	conmanService := conman.NewConmanService(cfg.Conman)
+	conmanService := conman.NewConmanService(config.Conman)
 
 	// then we set up the goroutine that controls conman
-	_, err := utils.EnsureDirPresent(cfg.Conman.LogsPath, 0755)
+	err := utils.EnsureDirPresent(config.Conman.LogsPath, 0755)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	credsService := creds.NewCredsService(cfg.Creds)
+	credsService := creds.NewCredsService(config.Creds)
 
 
 	// I am not sure that we need this, so I am leaving it out for
@@ -162,18 +161,20 @@ func runService(cfg config) error{
 	// have one container
 	// respinAggLog()
 
+	logsService := logs.NewLogsService(config.Log)
+
 	// Start log rotation with callback to signal conman
-	go logRotate(cfg, conmanService)
+	go logRotate(config, conmanService, logsService)
 
 	// spin a thread that watches for changes in console configuration
-	go watchForNodesUpdates(cfg, conmanService)
+	go watchForNodesUpdates(config, conmanService, logsService)
 
 	// start up the thread that runs conman
-	go runConman(cfg.DebugOnly, conmanService, credsService)
+	go runConman(config.DebugOnly, conmanService, credsService)
 
 	// start the thread that will make sure that the conman creds are correct
 
-	go watchForCredUpdates(cfg, credsService, conmanService)
+	go watchForCredUpdates(config, credsService, conmanService)
 
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs
@@ -182,10 +183,10 @@ func runService(cfg config) error{
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 
-	console.SetupRoutes(cfg.Conman.LogsPath)
+	console.SetupRoutes(config.Conman.LogsPath)
 
 	log.Printf("Spinning up http server...")
-	server := &http.Server{Addr: cfg.HttpListen, Handler: console.RequestRouter}
+	server := &http.Server{Addr: config.HttpListen, Handler: console.RequestRouter}
 
 	// signal to cleanly shut down
 	go func() {

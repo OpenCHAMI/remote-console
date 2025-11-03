@@ -11,17 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInitLogRotate(t *testing.T) {
+func TestInitNewLogsService(t *testing.T) {
 	tempDir := t.TempDir()
 
 	config := DefaultLogConfig()
-	config.ConsoleLogPath = tempDir
-	config.ConsoleLogBackupPath = filepath.Join(tempDir, "backups")
+	config.ConsoleLogsPath = tempDir
+	config.ConsoleLogsBackupPath = filepath.Join(tempDir, "backups")
 
-	InitLogRotate(config)
+	NewLogsService(config)
 
 	// Verify that the backup directory was created
-	_, err := os.Stat(config.ConsoleLogBackupPath)
+	_, err := os.Stat(config.ConsoleLogsBackupPath)
 	require.NoError(t, err, "Backup directory should exist")
 }
 
@@ -37,7 +37,9 @@ func TestUpdateLogRotateConf(t *testing.T) {
 		"x0c0s1b1": {NodeName: "x0c0s1b1"},
 	}
 
-	UpdateLogRotateConf(config, nodes)
+	service := NewLogsService(config)
+
+	service.UpdateLogRotateConf(nodes)
 
 	// Verify that the log rotation configuration file was created
 	data, err := os.ReadFile(config.LogRotateFilePath)
@@ -132,30 +134,38 @@ func TestRotateLogsOnce(t *testing.T) {
 	config := DefaultLogConfig()
 	config.LogRotateStateFilePath = logRotateStateFilePath
 	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
-	config.ConsoleLogPath = tempDir
-	config.ConsoleLogBackupPath = logBackupDir
-	config.ConsoleLogRotateEnabled = true
-	config.ConsoleLogFileSize = "1K"
+	config.ConsoleLogsPath = tempDir
+	config.ConsoleLogsBackupPath = logBackupDir
+	config.LogRotateEnabled = true
+	config.ConsoleLogsFileSize = "1K"
 
 	nodes := map[string]*types.NodeConsoleInfo{
 		"x0c0s1b0": {NodeName: "x0c0s1b0"},
 		"x0c0s1b1": {NodeName: "x0c0s1b1"},
 	}
+	service := NewLogsService(config)
 
-	UpdateLogRotateConf(config, nodes)
+	service.UpdateLogRotateConf(nodes)
+
+
+	// cast to logsService to access rotateLogsOnce
+	logsService, ok := service.(*logsService)
+	if !ok {
+		t.Fatalf("Failed to cast CredsService to credsService")
+	}
 
 	// Perform log rotation check
 	fileStamp := make(map[string]time.Time)
-	changed := rotateLogsOnce(config, fileStamp)
+	changed := logsService.rotateLogsOnce(config, fileStamp)
 	// TODO This is the current behavior, but seems wrong - should be false if no files exist?
 	require.True(t, changed, "Change should be detected")
 
-	changed = rotateLogsOnce(config, fileStamp)
+	changed = logsService.rotateLogsOnce(config, fileStamp)
 	require.False(t, changed, "Nothing should have changed")
 
 	// Now create some log files to trigger rotation
-	consoleLog1 := filepath.Join(config.ConsoleLogPath, "console.x0c0s1b0")
-	consoleLog2 := filepath.Join(config.ConsoleLogPath, "console.x0c0s1b1")
+	consoleLog1 := filepath.Join(config.ConsoleLogsPath, "console.x0c0s1b0")
+	consoleLog2 := filepath.Join(config.ConsoleLogsPath, "console.x0c0s1b1")
 
 	// Writ over 1KB of data to each log file
 	largeData := make([]byte, 2048)
@@ -173,7 +183,7 @@ func TestRotateLogsOnce(t *testing.T) {
 	fileStamp["x0c0s1b1"] = time.Now().Add(-2 * time.Hour)
 
 	// Perform log rotation check again
-	changed = rotateLogsOnce(config, fileStamp)
+	changed = logsService.rotateLogsOnce(config, fileStamp)
 	require.True(t, changed, "Log rotations should be detected")
 
 	// Verify that the log files have been rotated (moved to backup directory)
@@ -192,4 +202,30 @@ func TestRotateLogsOnce(t *testing.T) {
 	}
 	require.True(t, found1, "console.x0c0s1b0.1 should be in backup directory")
 	require.True(t, found2, "console.x0c0s1b1.1 should be in backup directory")
+}
+
+func TestReadLogRotTimestampsNoEntries(t *testing.T) {
+	// Prepare a temporary log rotation timestamp file with no entries
+	tempDir := t.TempDir()
+	logRotTimestampsFile := filepath.Join(tempDir, "logrot.timestamps")
+
+	content := "logrotate state -- version 2\n"
+
+	config := DefaultLogConfig()
+	config.LogRotateStateFilePath = logRotTimestampsFile
+	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
+
+	err := os.WriteFile(logRotTimestampsFile, []byte(content), 0600)
+	require.NoError(t, err)
+
+	fileStamp := make(map[string]time.Time)
+	// Read the timestamps
+	conChanged, aggChanged := readLogRotTimestamps(config, fileStamp)
+	require.False(t, conChanged, "Console logs should not show changes")
+	require.False(t, aggChanged, "Aggregation log should not show changes")
+
+	// Verify the contents
+	expected := map[string]time.Time{}
+
+	require.Equal(t, expected, fileStamp, "Timestamps should be empty")
 }

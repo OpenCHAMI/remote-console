@@ -18,7 +18,7 @@ func TestGenerateBaseConfig(t *testing.T) {
 	config := DefaultConmanConfig()
 	config.BaseConfFilePath = "../../scripts/conman.conf.tmpl"
 	config.ConfFilePath = filepath.Join(baseDir, "conman.conf")
-	config.LogFilesPath = filepath.Join(baseDir, "logs")
+	config.LogsPath = filepath.Join(baseDir, "logs")
 	config.PidFilePath = filepath.Join(baseDir, "conman.pid")
 
 	baseConfig, err := generateBaseConfig(config)
@@ -47,7 +47,7 @@ func TestConfigureConman(t *testing.T) {
 	config := DefaultConmanConfig()
 	config.BaseConfFilePath = "../../scripts/conman.conf.tmpl"
 	config.ConfFilePath = filepath.Join(tempDir, "conman.conf")
-	config.LogFilesPath = filepath.Join(tempDir, "logs")
+	config.LogsPath = filepath.Join(tempDir, "logs")
 	config.PidFilePath = filepath.Join(tempDir, "conman.pid")
 
 	nodes := map[string]*types.NodeConsoleInfo{

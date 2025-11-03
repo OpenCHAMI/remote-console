@@ -72,7 +72,7 @@ type CredsConfig struct {
 func DefaultCredsConfig() CredsConfig {
 	return CredsConfig{
 		SshConsoleKeyPath:    "/app/conman.key",
-		VaultBasePath:        "secret",
+		VaultBasePath:        "",
 		VaultRole:            "",
 		DebugOnly:            false,
 		SecureStorageAdapter: StorageAdapterVault,

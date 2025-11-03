@@ -56,8 +56,8 @@ func main() {
 	// Enable debug logging if requested.
 	debugLog.Init()
 
-	cfg := DefaultConfig()
-	cli := command(&cfg)
+	config := DefaultConfig()
+	cli := command(&config)
 
 	if err := cli.Run(context.Background(), os.Args); err != nil {
 		log.Fatal(err)
