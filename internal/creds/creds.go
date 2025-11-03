@@ -43,30 +43,29 @@ type CredsService interface {
 }
 
 type credsService struct {
-	config CredsConfig
-	previousPasswords map[string]compcreds.CompCredentials
+	config                 CredsConfig
+	previousPasswords      map[string]compcreds.CompCredentials
 	previousPrivateKeyHash []byte
-	previousCertHash []byte
+	previousCertHash       []byte
 }
 
-
 func NewCredsService(config CredsConfig) CredsService {
-	return &credsService{	
-		config: config,
-		previousPasswords: nil,
+	return &credsService{
+		config:                 config,
+		previousPasswords:      nil,
 		previousPrivateKeyHash: nil,
-		previousCertHash: nil,
+		previousCertHash:       nil,
 	}
 }
 
 type CredsConfig struct {
-	DebugOnly            bool `flag:"-"`
-	SshConsoleKeyPath    string  `desc:"Path where the SSH private key file for console access will be writen to."`
-	SecureStorageAdapter StorageAdapter  `desc:"Type of secure storage adapter to use for credentials retrieval."`
-	VaultBasePath        string  `desc:"Base path in Vault where credentials are stored."`
-	VaultRole            string `desc:"Vault role to use when authenticating to Vault."`
-	LocalStoreFilePath   string `desc:"Path to local secure storage file."`
-	LocalStoreKey        string `desc:"Key to use for local secure storage decryption."`
+	DebugOnly            bool           `flag:"-"`
+	SshConsoleKeyPath    string         `desc:"Path where the SSH private key file for console access will be writen to."`
+	SecureStorageAdapter StorageAdapter `desc:"Type of secure storage adapter to use for credentials retrieval."`
+	VaultBasePath        string         `desc:"Base path in Vault where credentials are stored."`
+	VaultRole            string         `desc:"Vault role to use when authenticating to Vault."`
+	LocalStoreFilePath   string         `desc:"Path to local secure storage file."`
+	LocalStoreKey        string         `desc:"Key to use for local secure storage decryption."`
 }
 
 func DefaultCredsConfig() CredsConfig {

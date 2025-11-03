@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-func EnsureDirPresent(dir string, perm os.FileMode)  error {
+func EnsureDirPresent(dir string, perm os.FileMode) error {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		log.Printf("Directory does not exist, creating: %s", dir)
 		err = os.MkdirAll(dir, perm)

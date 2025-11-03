@@ -33,17 +33,17 @@ type ConmanService interface {
 	SignalConmanHUP()
 }
 
-type conmanService struct{
-	config ConmanConfig
-	mutex sync.Mutex
+type conmanService struct {
+	config  ConmanConfig
+	mutex   sync.Mutex
 	command *exec.Cmd
 }
 
 type ConmanConfig struct {
-	DebugOnly          bool `flag:"-"`
-	BaseConfFilePath   string  `desc:"Path to the base conman configuration template file."`
+	DebugOnly          bool   `flag:"-"`
+	BaseConfFilePath   string `desc:"Path to the base conman configuration template file."`
 	ConfFilePath       string `desc:"Path to the generated conman configuration file."`
-	LogsPath       string `desc:"Path to conman log files."`
+	LogsPath           string `desc:"Path to conman log files."`
 	PidFilePath        string `desc:"Path to the conman PID file."`
 	ConsoleScriptsPath string `desc:"Path to console helper scripts."`
 }
@@ -53,7 +53,7 @@ func DefaultConmanConfig() ConmanConfig {
 		DebugOnly:          false,
 		BaseConfFilePath:   "/app/conman_base.conf.tmpl",
 		ConfFilePath:       "/etc/conman.conf",
-		LogsPath:       "/var/log/conman",
+		LogsPath:           "/var/log/conman",
 		PidFilePath:        "/var/run/conman.pid",
 		ConsoleScriptsPath: "/usr/bin",
 	}
@@ -61,8 +61,8 @@ func DefaultConmanConfig() ConmanConfig {
 
 func NewConmanService(config ConmanConfig) ConmanService {
 	return &conmanService{
-		config: config,
-		mutex: sync.Mutex{},
+		config:  config,
+		mutex:   sync.Mutex{},
 		command: nil,
 	}
 }

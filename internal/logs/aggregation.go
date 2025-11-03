@@ -43,9 +43,6 @@ import (
 var conAggMutex = &sync.Mutex{}
 var conAggLogger *log.Logger = nil
 
-
-
-
 var conAggLogFile string = ""
 
 // map to cancel threads tailing log files
@@ -129,7 +126,7 @@ func (ls *logsService) respinAggLog() {
 			log.Printf("Error getting hostname:%s", err)
 			hostname = "unknown"
 		}
-		conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log",ls.config.AggLogsPath, hostname)
+		conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log", ls.config.AggLogsPath, hostname)
 	}
 
 	// ensure the directory exists

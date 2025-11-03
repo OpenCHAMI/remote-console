@@ -2,41 +2,41 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
-	"fmt"
-	
+
 	"github.com/urfave/cli/v3"
 	"github.com/urfave/sflags"
 	"github.com/urfave/sflags/gen/gcli"
 )
 
 func ensureTrailingSlash(url string) string {
-    if url == "" {
-        return url
-    }
-    if !strings.HasSuffix(url, "/") {
-        return url + "/"
-    }
-    return url
+	if url == "" {
+		return url
+	}
+	if !strings.HasSuffix(url, "/") {
+		return url + "/"
+	}
+	return url
 }
 
-func command(config *remoteConsoleConfig)  *cli.Command {
+func command(config *remoteConsoleConfig) *cli.Command {
 
 	cmd := &cli.Command{
-			Name:        "remote-console",
-			Usage:       "access remote consoles",
-			Description: "OpenCHAMI remote console service",
-			Before: func(ctx context.Context, c *cli.Command) (context.Context, error) {
-				fmt.Printf("Starting remote-console service...: %s\n", config.Log.ConsoleLogsPath)
-				config.SmdURL = ensureTrailingSlash(config.SmdURL)
+		Name:        "remote-console",
+		Usage:       "access remote consoles",
+		Description: "OpenCHAMI remote console service",
+		Before: func(ctx context.Context, c *cli.Command) (context.Context, error) {
+			fmt.Printf("Starting remote-console service...: %s\n", config.Log.ConsoleLogsPath)
+			config.SmdURL = ensureTrailingSlash(config.SmdURL)
 
-				return ctx, validateConfig(config)
-			},
-			Action: func(context.Context, *cli.Command) error {
-				return runService(*config)
-			},
-		}
+			return ctx, validateConfig(config)
+		},
+		Action: func(context.Context, *cli.Command) error {
+			return runService(*config)
+		},
+	}
 
 	err := gcli.ParseToV3(config, &cmd.Flags, sflags.EnvPrefix("RCS_"))
 	if err != nil {

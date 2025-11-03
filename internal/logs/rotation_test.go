@@ -147,7 +147,6 @@ func TestRotateLogsOnce(t *testing.T) {
 
 	service.UpdateLogRotateConf(nodes)
 
-
 	// cast to logsService to access rotateLogsOnce
 	logsService, ok := service.(*logsService)
 	if !ok {

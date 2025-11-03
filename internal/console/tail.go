@@ -13,21 +13,21 @@ import (
 )
 
 type consoleTailSession struct {
-	nodeID string
-	conn   *websocket.Conn
-	tail   *tail.Tail
-	ctx    context.Context
-	cancel context.CancelFunc
+	nodeID          string
+	conn            *websocket.Conn
+	tail            *tail.Tail
+	ctx             context.Context
+	cancel          context.CancelFunc
 	consoleLogsPath string
 }
 
 func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID string, conn *websocket.Conn) *consoleTailSession {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	return &consoleTailSession{
-		nodeID: nodeID,
-		conn:   conn,
-		ctx:    sessionCtx,
-		cancel: cancel,
+		nodeID:          nodeID,
+		conn:            conn,
+		ctx:             sessionCtx,
+		cancel:          cancel,
 		consoleLogsPath: consoleLogsPath,
 	}
 }

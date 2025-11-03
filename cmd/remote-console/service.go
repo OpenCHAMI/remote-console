@@ -17,7 +17,6 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
-
 // Watch for node updates and signal conman and log rotation as needed
 func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.ConmanService, logsService logs.LogsService) {
 	if conmanService == nil {
@@ -53,7 +52,7 @@ func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.Conma
 }
 
 // Watch for credential updates and signal conman as needed
-func watchForCredUpdates(config remoteConsoleConfig,credsService creds.CredsService, conmanService conman.ConmanService) {
+func watchForCredUpdates(config remoteConsoleConfig, credsService creds.CredsService, conmanService conman.ConmanService) {
 	time.Sleep(time.Duration(config.CredsMonitorInterval) * time.Second)
 	for {
 		changed, err := credsService.CheckForUpdates()
@@ -71,13 +70,12 @@ func watchForCredUpdates(config remoteConsoleConfig,credsService creds.CredsServ
 }
 
 // Log rotation setup and loop
-func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService , logsService logs.LogsService) {
+func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService, logsService logs.LogsService) {
 	logConfig := config.Log
 	// log the log rotation parameters
 	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logConfig.LogRotateEnabled, logConfig.LogRotateCheckFrequency)
 	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logConfig.ConsoleLogsFileSize, logConfig.ConsoleLogsNumRotate)
 	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logConfig.AggLogsFileSize, logConfig.AggLogsNumRotate)
-
 
 	// Create the log rotation configuration file
 	logsService.UpdateLogRotateConf(nodes.CurrentNodes())
@@ -138,7 +136,7 @@ func runConman(debug bool, conmanService conman.ConmanService, credService creds
 	}
 }
 
-func runService(config remoteConsoleConfig) error{
+func runService(config remoteConsoleConfig) error {
 
 	log.Printf("Remote console service starting")
 	// Set up the zombie killer
@@ -154,7 +152,6 @@ func runService(config remoteConsoleConfig) error{
 	}
 
 	credsService := creds.NewCredsService(config.Creds)
-
 
 	// I am not sure that we need this, so I am leaving it out for
 	// now, I think that normal logging will work now that we only
@@ -190,7 +187,7 @@ func runService(config remoteConsoleConfig) error{
 
 	// signal to cleanly shut down
 	go func() {
-		
+
 		// NOTE: do not use log.Fatal as that will immediately exit
 		// the program and short-circuit the shutdown logic below
 		log.Printf("Info: Server %s\n", server.ListenAndServe())

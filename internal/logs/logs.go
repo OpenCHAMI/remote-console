@@ -4,19 +4,17 @@ import (
 	"sync"
 
 	"github.com/OpenCHAMI/remote-console/internal/types"
-
 )
 
 type LogsService interface {
 	UpdateLogRotateConf(nodes map[string]*types.NodeConsoleInfo)
 	LogRotate() bool
-	AggregateFiles(nodes map[string]*types.NodeConsoleInfo) 
+	AggregateFiles(nodes map[string]*types.NodeConsoleInfo)
 }
 
-
-type logsService struct{
+type logsService struct {
 	config LogConfig
-	mutex sync.Mutex
+	mutex  sync.Mutex
 }
 
 func NewLogsService(config LogConfig) LogsService {
@@ -28,4 +26,3 @@ func NewLogsService(config LogConfig) LogsService {
 
 	return service
 }
-

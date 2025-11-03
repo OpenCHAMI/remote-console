@@ -40,12 +40,6 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
-
-
-
-
-
-
 // LogRotate initializes and starts log rotation
 func (ls *logsService) initLogRotate() error {
 	fmt.Printf("InitLogRotate: Setting up log rotation\n")
