@@ -89,19 +89,19 @@ func TestCheckIfKeysChanged(t *testing.T) {
 	ss, err := securestorage.NewLocalSecretStore(localStoreKey, localStoreFilePath, true)
 	require.NoError(t, err)
 
-	// Save test key
-	testKey := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7..."
-	value := map[string]string{
-		"PrivateKey": testKey,
-	}
-	err = ss.Store(consoleKeysPath, value)
-	require.NoError(t, err)
-
 	config := DefaultCredsConfig()
 	config.SecureStorageAdapter = StorageAdapterLocal
 	config.LocalStoreFilePath = localStoreFilePath
 	config.LocalStoreKey = localStoreKey
 	config.SshConsoleKeyPath = filepath.Join(tempDir, "conman.key")
+
+	// Save test key
+	testKey := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7..."
+	value := map[string]string{
+		"PrivateKey": testKey,
+	}
+	err = ss.Store(config.SecureStorageSshKeysPath, value)
+	require.NoError(t, err)
 
 	service := NewCredsService(config)
 
@@ -125,7 +125,7 @@ func TestCheckIfKeysChanged(t *testing.T) {
 	value = map[string]string{
 		"PrivateKey": newTestKey,
 	}
-	err = ss.Store(consoleKeysPath, value)
+	err = ss.Store(config.SecureStorageSshKeysPath, value)
 	require.NoError(t, err)
 
 	changed, err = cs.checkIfKeysChanged()

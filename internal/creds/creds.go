@@ -59,24 +59,28 @@ func NewCredsService(config CredsConfig) CredsService {
 }
 
 type CredsConfig struct {
-	DebugOnly            bool           `flag:"-"`
-	SshConsoleKeyPath    string         `desc:"Path where the SSH private key file for console access will be writen to."`
-	SecureStorageAdapter StorageAdapter `desc:"Type of secure storage adapter to use for credentials retrieval."`
-	VaultBasePath        string         `desc:"Base path in Vault where credentials are stored."`
-	VaultRole            string         `desc:"Vault role to use when authenticating to Vault."`
-	LocalStoreFilePath   string         `desc:"Path to local secure storage file."`
-	LocalStoreKey        string         `desc:"Key to use for local secure storage decryption."`
+	DebugOnly                  bool           `flag:"-"`
+	SshConsoleKeyPath          string         `desc:"Path where the SSH private key file for console access will be writen to."`
+	SecureStorageAdapter       StorageAdapter `desc:"Type of secure storage adapter to use for credentials retrieval."`
+	VaultBasePath              string         `desc:"Base path in Vault where credentials are stored."`
+	VaultRole                  string         `desc:"Vault role to use when authenticating to Vault."`
+	LocalStoreFilePath         string         `desc:"Path to local secure storage file."`
+	LocalStoreKey              string         `desc:"Key to use for local secure storage decryption."`
+	SecureStorageSshKeysPath   string         `desc:"Path where the SSH keys can be found in secure storage."`
+	SecureStoragePasswordsPath string         `desc:"Path where the console credentials access can be found in secure storage."`
 }
 
 func DefaultCredsConfig() CredsConfig {
 	return CredsConfig{
-		SshConsoleKeyPath:    "/app/conman.key",
-		VaultBasePath:        "",
-		VaultRole:            "",
-		DebugOnly:            false,
-		SecureStorageAdapter: StorageAdapterVault,
-		LocalStoreFilePath:   "",
-		LocalStoreKey:        "",
+		SshConsoleKeyPath:        "/app/conman.key",
+		VaultBasePath:            "",
+		VaultRole:                "",
+		DebugOnly:                false,
+		SecureStorageAdapter:     StorageAdapterVault,
+		LocalStoreFilePath:       "",
+		LocalStoreKey:            "",
+		SecureStorageSshKeysPath: "bmc-console-keys",
+		SecureStoragePasswordsPath: "hms-creds",
 	}
 }
 
@@ -85,10 +89,6 @@ type StorageAdapter string
 const (
 	StorageAdapterVault StorageAdapter = "vault"
 	StorageAdapterLocal StorageAdapter = "local"
-)
-
-const (
-	consoleKeysPath string = "bmc-console-keys"
 )
 
 func NewStorageAdapter(value string) (StorageAdapter, error) {
@@ -184,7 +184,7 @@ func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.
 		return nil, fmt.Errorf("error creating secure storage adapter %#v\n", err)
 	}
 
-	ccs := compcreds.NewCompCredStore("hms-creds", ss)
+	ccs := compcreds.NewCompCredStore(config.SecureStoragePasswordsPath, ss)
 	ccreds, err := ccs.GetCompCreds(bmcXNames)
 	if err != nil {
 		return nil, fmt.Errorf("error create comp creds store: %#v\n", err)
@@ -213,7 +213,7 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 		return false, fmt.Errorf("unable to create secure storage adapter: %v", err)
 	}
 	var consoleKeys sshKeys
-	err = ss.Lookup(consoleKeysPath, &consoleKeys)
+	err = ss.Lookup(cs.config.SecureStorageSshKeysPath, &consoleKeys)
 	if err != nil {
 		return false, fmt.Errorf("unable to lookup private key: %v", err)
 	}
