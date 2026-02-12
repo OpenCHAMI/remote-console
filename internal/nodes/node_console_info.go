@@ -1,6 +1,8 @@
-// MIT License
-// (C) Copyright 2019-2024 Hewlett Packard Enterprise Development LP
+// Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+// Copyright © 2019-2024 Hewlett Packard Enterprise Development LP
 //
+// SPDX-License-Identifier: MIT
+
 // NodeConsoleInfo type and helpers for console node metadata
 
 package nodes

@@ -1,6 +1,8 @@
-// MIT License
-// (C) Copyright 2023-2024 Hewlett Packard Enterprise Development LP
+// Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+// Copyright © 2023-2024 Hewlett Packard Enterprise Development LP
 //
+// SPDX-License-Identifier: MIT
+
 // This file contains the functions to monitor for changes in keys and certs
 
 package creds

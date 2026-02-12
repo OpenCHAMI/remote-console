@@ -1,3 +1,8 @@
+// Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+// Copyright © 2019 - 2025 Hewlett Packard Enterprise Development LP
+//
+// SPDX-License-Identifier: MIT
+
 package logs
 
 import (

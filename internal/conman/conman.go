@@ -1,6 +1,8 @@
-// MIT License
-// (C) Copyright 2025 Hewlett Packard Enterprise Development LP
+// Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+// Copyright © 2025 Hewlett Packard Enterprise Development LP
 //
+// SPDX-License-Identifier: MIT
+
 // This file contains the interfaces and dependency injection points for conman management.
 
 package conman

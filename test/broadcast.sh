@@ -1,4 +1,8 @@
 #!/bin/bash
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
 # A script to broadcast a message to all logged-in users' TTYs
 
 broadcast_message() {
