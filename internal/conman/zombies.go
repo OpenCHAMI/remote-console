@@ -24,12 +24,12 @@
 
 // This file contains the code needed to handle zombie processes
 
-package console
+package conman
 
 import (
 	"bytes"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -38,11 +38,11 @@ import (
 )
 
 // NOTE:  Any time a container is started with a particular application running
-//  as nid0, that process is required to handle any zombie processes that are
+//  as pid 1, that process is required to handle any zombie processes that are
 //  orphaned in the pod.  This is a process running in the background that will
 //  find zombie processes and terminate them cleanly.
 
-// Function to scan the process table for zombie processes
+// WatchForZombies scans the process table for zombie processes and cleans them up.
 func WatchForZombies() {
 	for {
 		// get the process information from the system
@@ -57,7 +57,7 @@ func WatchForZombies() {
 	}
 }
 
-// Find all the current zombie processes
+// findZombies finds all the current zombie processes
 func findZombies() []int {
 	var zombies []int = nil
 	var outBuf bytes.Buffer
@@ -68,7 +68,7 @@ func findZombies() []int {
 	cmd.Stdout = &outBuf
 	err := cmd.Run()
 	if err != nil {
-		log.Printf("Error getting current processes: %s", err)
+		slog.Error("Error getting current processes", "error", err)
 	}
 	// process the output buffer to find zombies
 	var readLine string
@@ -77,7 +77,7 @@ func findZombies() []int {
 		if readLine, err = outBuf.ReadString('\n'); err == io.EOF {
 			break
 		} else if err != nil {
-			log.Printf("Error reading current process output: %s", err)
+			slog.Error("Error reading current process output", "error", err)
 			break
 		}
 		// NOTE: a 'STATUS' of "Z" denotes a zombie process
@@ -86,30 +86,30 @@ func findZombies() []int {
 			// found a zombie
 			zPid, err := strconv.Atoi(cols[0])
 			if err == nil {
-				log.Printf("Found a zombie process: %d", zPid)
+				slog.Info("Found a zombie process", "pid", zPid)
 				zombies = append(zombies, zPid)
 			} else {
 				// atoi did not like our process "number"
-				log.Printf("Thought we had a zombie, couldn't get pid:%s", readLine)
+				slog.Warn("Thought we had a zombie, couldn't get pid", "line", readLine)
 			}
 		}
 	}
 	return zombies
 }
 
-// Kill (wait for) the zombie process with the given pid
+// killZombie kills (waits for) the zombie process with the given pid
 func killZombie(pid int) {
-	log.Printf("Killing zombie process: %d", pid)
+	slog.Info("Killing zombie process", "pid", pid)
 	p, err := os.FindProcess(pid)
 	if err != nil {
-		log.Printf("Error attaching to zombie process %d, err:%s", pid, err)
+		slog.Error("Error attaching to zombie process", "pid", pid, "error", err)
 		return
 	}
 	// should just need to get the exit state to clean up process
 	_, err = p.Wait()
 	if err != nil {
-		log.Printf("Error waiting for zombie process %d, err:%s", pid, err)
+		slog.Error("Error waiting for zombie process", "pid", pid, "error", err)
 		return
 	}
-	log.Printf("Cleaned up zombie process: %d", pid)
+	slog.Info("Cleaned up zombie process", "pid", pid)
 }
