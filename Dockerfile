@@ -10,10 +10,12 @@
 
 FROM ubuntu:24.04 AS ubuntu-goreleaser
 
+ARG TARGETPLATFORM
+
 RUN apt -y update
 RUN apt -y install conman less vim ssh jq tar procps inotify-tools
 
-COPY remote-console /app/
+COPY ${TARGETPLATFORM}/remote-console /app/
 COPY scripts/conman.conf.tmpl /app/conman.conf.tmpl
 COPY scripts/ssh-key-console /usr/bin/
 COPY scripts/ssh-pwd-console /usr/bin/
