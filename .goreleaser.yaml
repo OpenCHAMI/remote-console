@@ -1,4 +1,4 @@
-version: 2.4
+version: 2
 
 project_name: remote-console
 before:
@@ -36,70 +36,35 @@ builds:
          -X main.GoVersion={{ .Env.GO_VERSION }} \
          -X main.BuildUser={{ .Env.BUILD_USER }} "
 
-dockers:
-  - image_templates:
-      - &amd64_linux_image ghcr.io/openchami/{{.ProjectName}}:{{ .Tag }}-amd64
-      - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}-amd64
-      - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}.{{ .Minor }}-amd64
-    use: buildx
-    build_flag_templates:
+dockers_v2:
+  - id: remote-console
+    ids:
+      - remote-console
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/openchami/{{.ProjectName}}
+    tags:
+      - "{{ .Tag }}"
+      - "{{ .Major }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+      # TODO: Add linux/arm64 when ARM base images and conman packages are available
+    flags:
       - "--pull"
       - "--target=ubuntu-goreleaser"
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-    goarch: amd64
-    goamd64: v3
+    annotations:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
     extra_files:
       - LICENSE
       - CHANGELOG.md
       - README.md
       - configs/
       - scripts/
-
-  # TODO: more ARM config that isn't viable yet.
-  #- image_templates:
-  #    - &arm64v8_linux_image ghcr.io/openchami/{{.ProjectName}}:{{ .Tag }}-arm64
-  #    - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}-arm64
-  #    - ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}.{{ .Minor }}-arm64
-  #  use: buildx
-  #  build_flag_templates:
-  #    - "--pull"
-  #    - "--platform=linux/arm64"
-  #    - "--label=org.opencontainers.image.created={{.Date}}"
-  #    - "--label=org.opencontainers.image.title={{.ProjectName}}"
-  #    - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-  #    - "--label=org.opencontainers.image.version={{.Version}}"
-  #  goarch: arm64
-  #  extra_files:
-  #    - LICENSE
-  #    - CHANGELOG.md
-  #    - README.md
-  #    - configs/
-
-docker_manifests:
-  # TODO: ARM ARM ARM
-  - name_template: "ghcr.io/openchami/{{.ProjectName}}:latest"
-    image_templates:
-      - *amd64_linux_image
-      #- *arm64v8_linux_image
-
-  - name_template: "ghcr.io/openchami/{{.ProjectName}}:{{ .Tag }}"
-    image_templates:
-      - *amd64_linux_image
-      #- *arm64v8_linux_image
-
-  - name_template: "ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}"
-    image_templates:
-      - *amd64_linux_image
-      #- *arm64v8_linux_image
-
-  - name_template: "ghcr.io/openchami/{{.ProjectName}}:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - *amd64_linux_image
-      #- *arm64v8_linux_image
 
 archives:
   - formats: ["tar.gz"]
@@ -121,11 +86,22 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 changelog:
+  use: github
   sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^chore:'
 
 
 # The lines beneath this are called `modelines`. See `:help modeline`
