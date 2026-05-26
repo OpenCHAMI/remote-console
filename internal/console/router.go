@@ -17,6 +17,8 @@ import (
 	openchami_authenticator "github.com/openchami/chi-middleware/auth"
 )
 
+const routePrefix = "/remote-console"
+
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -51,34 +53,30 @@ func SetupRoutes(consoleLogsPath string) *chi.Mux {
 	// Add common middleware
 	router.Use(middleware.RedirectSlashes)
 
-	// Public routes (no authentication required)
-	router.Get("/remote-console/liveness", doLiveness)
-	router.Get("/remote-console/readiness", doReadiness)
-	router.Get("/remote-console/health", doHealth)
+	router.Route(routePrefix, func(r chi.Router) {
+		// Public routes (no authentication required)
+		r.Get("/liveness", doLiveness)
+		r.Get("/readiness", doReadiness)
+		r.Get("/health", doHealth)
 
-	// Protected routes - add to a sub-router with JWT middleware
-	router.Group(func(r chi.Router) {
-		// Conditionally add JWT authentication middleware
-		if TokenAuth != nil {
-			r.Use(
-				jwtauth.Verifier(TokenAuth),
-				openchami_authenticator.AuthenticatorWithRequiredClaims(TokenAuth, []string{"sub", "iss", "aud"}),
-			)
-		} else {
-			slog.Warn("JWT authentication is disabled - all console endpoints are unprotected")
-		}
+		// Protected routes - add to a sub-router with JWT middleware
+		r.Group(func(r chi.Router) {
+			// Conditionally add JWT authentication middleware
+			if TokenAuth != nil {
+				r.Use(
+					jwtauth.Verifier(TokenAuth),
+					openchami_authenticator.AuthenticatorWithRequiredClaims(TokenAuth, []string{"sub", "iss", "aud"}),
+				)
+			} else {
+				slog.Warn("JWT authentication is disabled - all console endpoints are unprotected")
+			}
 
-		r.Get("/remote-console/consoles", doConsoles)
-		r.Get("/remote-console/consoles/{nodeID}", func(w http.ResponseWriter, r *http.Request) {
-			doConsole(consoleLogsPath, w, r)
+			r.Get("/consoles", doConsoles)
+			r.Get("/consoles/{nodeID}", func(w http.ResponseWriter, r *http.Request) {
+				doConsole(consoleLogsPath, w, r)
+			})
 		})
 	})
-
-	// debug only routes
-	// router.Get("/remote-console/info", dbs.doInfo)
-	// router.Delete("/remote-console/clearData", dbs.doClearData)
-	// router.Post("/remote-console/suspend", dbs.doSuspend)
-	// router.Post("/remote-console/resume", dbs.doResume)
 
 	return router
 }
