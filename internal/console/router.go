@@ -27,7 +27,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // doConsole dispatches to either interactive or tail mode based on the mode query parameter
-func doConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
+func doConsole(consoleLogsPath string, sessions *interactiveSessions, w http.ResponseWriter, r *http.Request) {
 	// Parse mode parameter (defaults to "interactive")
 	params := r.URL.Query()
 	mode := params.Get("mode")
@@ -39,7 +39,7 @@ func doConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
 	case "tail":
 		doTailConsole(consoleLogsPath, w, r)
 	case "interactive":
-		doInteractiveConsole(w, r)
+		doInteractiveConsole(sessions, w, r)
 	default:
 		http.Error(w, fmt.Sprintf("Invalid mode parameter: %s (must be 'interactive' or 'tail')", mode), http.StatusBadRequest)
 	}
@@ -47,6 +47,7 @@ func doConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
 
 func SetupRoutes(consoleLogsPath string) *chi.Mux {
 	router := chi.NewRouter()
+	interactiveSessions := newInteractiveSessions()
 
 	// Add common middleware
 	router.Use(middleware.RedirectSlashes)
@@ -70,7 +71,7 @@ func SetupRoutes(consoleLogsPath string) *chi.Mux {
 
 		r.Get("/remote-console/consoles", doConsoles)
 		r.Get("/remote-console/consoles/{nodeID}", func(w http.ResponseWriter, r *http.Request) {
-			doConsole(consoleLogsPath, w, r)
+			doConsole(consoleLogsPath, interactiveSessions, w, r)
 		})
 	})
 

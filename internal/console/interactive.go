@@ -25,6 +25,43 @@ import (
 	"github.com/nxadm/tail/ratelimiter"
 )
 
+// interactiveSessions tracks which nodes currently have an active
+// interactive console session, ensuring at most one session per node.
+type interactiveSessions struct {
+	mu     sync.Mutex
+	active map[string]struct{}
+}
+
+func newInteractiveSessions() *interactiveSessions {
+	return &interactiveSessions{
+		active: make(map[string]struct{}),
+	}
+}
+
+// reserve attempts to claim an interactive session for nodeID.
+// It returns true if the reservation succeeded, or false if a session
+// is already active for that node. Each successful reserve must be
+// paired with a call to release.
+func (s *interactiveSessions) reserve(nodeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.active[nodeID]; exists {
+		return false
+	}
+	s.active[nodeID] = struct{}{}
+	return true
+}
+
+// release removes any active reservation for nodeID. It is a no-op if
+// no reservation exists, making it safe to call unconditionally (e.g.
+// from a deferred cleanup).
+func (s *interactiveSessions) release(nodeID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.active, nodeID)
+}
+
 // interactiveConsoleSession manages the lifecycle of an interactive console session
 type interactiveConsoleSession struct {
 	cmd       *exec.Cmd
@@ -395,7 +432,7 @@ func newInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interact
 	return session
 }
 
-func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
+func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, r *http.Request) {
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
@@ -410,6 +447,12 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Node doesn't exists", http.StatusNotFound)
 		return
 	}
+
+	if ok := sessions.reserve(nodeID); !ok {
+		http.Error(w, fmt.Sprintf("Console %s is already in use", nodeID), http.StatusConflict)
+		return
+	}
+	defer sessions.release(nodeID)
 
 	slog.Info("Starting interactive console session", "nodeID", nodeID)
 
