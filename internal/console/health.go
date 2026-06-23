@@ -18,7 +18,6 @@ import (
 // HealthResponse - used to report service health stats
 type HealthResponse struct {
 	NumberConsoles     string `json:"consoles"`
-	HardwareUpdateSec  string `json:"hardwareupdatesec"`
 	LastHardwareUpdate string `json:"hardwareupdate"`
 }
 

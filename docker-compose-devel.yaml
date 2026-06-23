@@ -1,210 +1,193 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
 #
-# MIT License
-#
-# (C) Copyright 2021-2022 Hewlett Packard Enterprise Development LP
-#
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-# OTHER DEALINGS IN THE SOFTWARE.
-#
-
-networks:
-  rcs:
-
+# SPDX-License-Identifier: MIT
 services:
-  remote-console:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  postgres:
+    image: postgres:15-alpine
     environment:
-      - SMD_URL=http://smd:27779/
-      - CRAY_VAULT_AUTH_PATH=auth/token/create
-      - CRAY_VAULT_ROLE_FILE=configs/namespace
-      - CRAY_VAULT_JWT_FILE=configs/token
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=hms
-      - VAULT_KEYPATH=hms-creds
-      - VAULT_SKIP_VERIFY=true
-      - VAULT_ENABLED=true
-      - LOG_LEVEL=DEBUG
-    volumes:
-      - ./configs/namespace:/configs/namespace
-      - ./configs/token:/configs/token
-    depends_on:
-      - vault-kv-enabler
-      - emulator-loader
-      - smd
+      POSTGRES_DB: hmsds
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hmsds"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
-      - rcs
+      - rcs-network
+
   vault:
-    hostname: vault
-    image: docker.io/library/vault:1.5.5
+    image: hashicorp/vault:1.15
     environment:
-      - VAULT_DEV_ROOT_TOKEN_ID=hms
-      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
-      - VAULT_ADDR=http://127.0.0.1:8200
+      VAULT_DEV_ROOT_TOKEN_ID: "hms"
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      VAULT_ADDR: "http://127.0.0.1:8200"
     cap_add:
       - IPC_LOCK
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
-      - rcs
+      - rcs-network
+      - console-network
+
   vault-kv-enabler:
     build:
       context: .
       dockerfile: vault-kv-enabler.dockerfile
     environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=hms
-      - KV_STORES=hms-creds
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "hms"
+      KV_STORES: "hms-creds"
     depends_on:
-      - vault
+      vault:
+        condition: service_healthy
     networks:
-      - rcs
-  postgres:
-    hostname: postgres
-    image: docker.io/library/postgres:11-alpine
-    environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_DB=hmsds
-    networks:
-      - rcs
+      - rcs-network
+
   smd-init:
-    image: ghcr.io/openchami/smd:2.17
+    image: ghcr.io/openchami/smd:v2.19.2
     environment:
-      - SMD_DBHOST=postgres
-      - SMD_DBPORT=5432
-      - SMD_DBNAME=hmsds
-      - SMD_DBUSER=${POSTGRES_USER:-postgres}
-      - SMD_DBPASS=${POSTGRES_PASSWORD:-postgres}
-      - SMD_DBOPTS=sslmode=disable
+      SMD_DBHOST: "postgres"
+      SMD_DBPORT: "5432"
+      SMD_DBNAME: "hmsds"
+      SMD_DBUSER: "postgres"
+      SMD_DBPASS: "postgres"
+      SMD_DBOPTS: "sslmode=disable"
+    command: ["/smd-init"]
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
-      - rcs
-    command: /smd-init
+      - rcs-network
+
   smd:
-    image: ghcr.io/openchami/smd:2.17
+    image: ghcr.io/openchami/smd:v2.19.2
     environment:
-      - SMD_DBHOST=postgres
-      - SMD_DBPORT=5432
-      - SMD_DBNAME=hmsds
-      - SMD_DBUSER=${POSTGRES_USER:-postgres}
-      - SMD_DBPASS=${POSTGRES_PASSWORD:-postgres}
-      - SMD_DBOPTS=sslmode=disable
-      - SMD_JWKS_URL=
-      - RF_MSG_HOST=kafka:9092:cray-dmtf-resource-event
-      - CRAY_VAULT_AUTH_PATH=auth/token/create
-      - CRAY_VAULT_ROLE_FILE=configs/namespace
-      - CRAY_VAULT_JWT_FILE=configs/token
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=hms
-      - VAULT_KEYPATH=hms-creds
-      - SMD_WVAULT=true
-      - SMD_RVAULT=true
-      - SMD_SLS_HOST=
-      - SMD_HBTD_HOST=
+      SMD_DBHOST: "postgres"
+      SMD_DBPORT: "5432"
+      SMD_DBNAME: "hmsds"
+      SMD_DBUSER: "postgres"
+      SMD_DBPASS: "postgres"
+      SMD_DBOPTS: "sslmode=disable"
+      SMD_JWKS_URL: ""
+      CRAY_VAULT_AUTH_PATH: "auth/token/create"
+      CRAY_VAULT_ROLE_FILE: "/configs/namespace"
+      CRAY_VAULT_JWT_FILE: "/configs/token"
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "hms"
+      VAULT_KEYPATH: "hms-creds"
+      SMD_WVAULT: "true"
+      SMD_RVAULT: "true"
+      SMD_SLS_HOST: ""
+      SMD_HBTD_HOST: ""
+      ENABLE_DISCOVERY: "true"
     volumes:
-      - ./configs/namespace:/configs/namespace
-      - ./configs/token:/configs/token
-    hostname: smd
-    depends_on:
-      - smd-init
-      - vault
+      - ./configs/namespace:/configs/namespace:ro
+      - ./configs/token:/configs/token:ro
     ports:
       - "27779:27779"
-    networks:
-      - rcs
-
-  #
-  # Emulator
-  #
-  emulator-loader:
-    image: library/golang:1.24-alpine
-    platform: linux/arm64
-    command: >
-      sh -c "apk add curl && sleep 10 &&
-      curl -X POST -d '{\"RedfishEndpoints\":[{
-        \"ID\":\"x0c0b0\",
-        \"FQDN\":\"x0c0b0\",
-        \"RediscoverOnUpdate\":true,
-        \"User\":\"root\",
-        \"Password\":\"root_password\"
-      },{
-        \"ID\":\"x0c0s1b0\",
-        \"FQDN\":\"x0c0s1b0\",
-        \"RediscoverOnUpdate\":true,
-        \"User\":\"root\",
-        \"Password\":\"root_password\"
-      },{
-        \"ID\":\"x0c0r2b0\",
-        \"FQDN\":\"x0c0r2b0\",
-        \"RediscoverOnUpdate\":true,
-        \"User\":\"root\",
-        \"Password\":\"root_password\"}]}' http://smd:27779/hsm/v2/Inventory/RedfishEndpoints"
     depends_on:
-      - smd
-      - rfemulator0
-      - rfemulator1
-      - rfemulator2
+      smd-init:
+        condition: service_completed_successfully
+      vault:
+        condition: service_healthy
     networks:
-      - rcs
+      - rcs-network
+      - rf-network
 
-  rfemulator0:
-    hostname: x0c0b0
+  redfish-emulator:
     image: ghcr.io/openchami/csm-rie:v1.6.7
-    environment:
-      - MOCKUPFOLDER=CMM
-      - XNAME=x0c0b0
-      # - "AUTH_CONFIG=root:root_password:Administrator"
-      - PORT=443
-    ports:
-      - "5000:443"
-    networks:
-      rcs:
-        aliases:
-          - x0c0b0
-
-  rfemulator1:
     hostname: x0c0s1b0
-    image: ghcr.io/openchami/csm-rie:v1.6.7
     environment:
-      - MOCKUPFOLDER=EX235a
-      - MAC_SCHEMA=Mountain
-      - XNAME=x0c0s1b0
-      # - "AUTH_CONFIG=root:root_password:Administrator"
-      - PORT=443
+      MOCKUPFOLDER: "ssh"
+      MAC_SCHEMA: "Mountain"
+      XNAME: "x0c0s1b0"
+      PORT: "443"
+      AUTH_CONFIG: "ADMIN:ADMIN:Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
+    volumes:
+      - ./test/redfish-emulator-mocks:/app/api_emulator/redfish/static/:ro
     ports:
-      - "5001:443"
+      - "8443:443"
     networks:
-      rcs:
+      rf-network:
         aliases:
           - x0c0s1b0
 
-  rfemulator2:
-    hostname: x0c0r2b0
-    image: ghcr.io/openchami/csm-rie:v1.6.7
+  ssh-server:
+    image: linuxserver/openssh-server:latest
+    hostname: x0c0s1b0
     environment:
-      - MOCKUPFOLDER=Slingshot_Switch_Blade
-      - XNAME=x0c0r2b0
-      # - "AUTH_CONFIG=root:root_password:Administrator"
-      - PORT=443
+      PASSWORD_ACCESS: "true"
+      USER_NAME: "ADMIN"
+      USER_PASSWORD: "ADMIN"
+      LISTEN_PORT: "22"
     ports:
-      - "5002:443"
+      - "2222:22"
     networks:
-      rcs:
+      console-network:
         aliases:
-          - x0c0r2b0
+          - x0c0s1b0
+
+  emulator-loader:
+    image: curlimages/curl:latest
+    command: >
+      sh -c "sleep 10 &&
+      curl -X POST http://smd:27779/hsm/v2/Inventory/RedfishEndpoints \
+      -H 'Content-Type: application/json' \
+      -d '{\"RedfishEndpoints\": [{\"ID\": \"x0c0s1b0\", \"FQDN\": \"x0c0s1b0\", \"RediscoverOnUpdate\": true, \"User\": \"ADMIN\", \"Password\": \"ADMIN\"}]}'"
+    depends_on:
+      smd:
+        condition: service_started
+    networks:
+      - rcs-network
+
+
+
+
+  remote-console:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      RCS_SMD_URL: "http://smd:27779"
+      SMS_SERVER: "http://smd:27779"
+      CRAY_VAULT_AUTH_PATH: "auth/token/create"
+      CRAY_VAULT_ROLE_FILE: "/app/configs/namespace"
+      CRAY_VAULT_JWT_FILE: "/app/configs/token"
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "hms"
+      VAULT_BASE_PATH: "hms-creds"
+      VAULT_SKIP_VERIFY: "true"
+      VAULT_ENABLED: "true"
+      LOG_LEVEL: "DEBUG"
+      RCS_NEW_NODE_LOOKUP: "10"
+      RCS_CREDS_MONITOR_INTERVAL: "10"
+      RCS_CREDS_SECURE_STORAGE_SSH_KEYS_PATH: "hms-creds/bmc-console-keys"
+      RCS_CONMAN_PID_FILE_PATH: "/app/remote-console.pid"
+      RCS_CONMAN_LOGS_PATH: "/tmp"
+    volumes:
+      - ./configs/namespace:/app/configs/namespace:ro
+      - ./configs/token:/app/configs/token:ro
+    ports:
+      - "26776:26776"
+    networks:
+      - rcs-network
+      - console-network
+    depends_on:
+      vault:
+        condition: service_healthy
+      smd:
+        condition: service_started
+
+networks:
+  rcs-network:
+    driver: bridge
+  rf-network:
+    driver: bridge
+  console-network:
+    driver: bridge
