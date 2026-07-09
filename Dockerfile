@@ -31,7 +31,7 @@ ENTRYPOINT ["/app/remote-console"]
 
 
 # Build Stage: Build the Go binary
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 RUN set -eux \
     && apt-get update \

@@ -22,7 +22,7 @@
 
 module github.com/OpenCHAMI/remote-console
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/Cray-HPE/hms-compcredentials v1.15.0
