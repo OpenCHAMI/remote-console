@@ -15,7 +15,7 @@ jobs:
           go-version-file: go.mod
       - name: Build remote-console binary for Dockerfile
         run: |
-          go build -o remote-console ./cmd/remote-console
+          go build -o remote-console ./cmd/server
       - name: Run integration tests
         run: |
           go test ./test -timeout 20m ./test

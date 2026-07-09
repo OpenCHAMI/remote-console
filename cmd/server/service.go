@@ -11,9 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
@@ -28,7 +26,7 @@ import (
 
 const smdHTTPTimeout = 15 * time.Second
 
-// ConmanService defines the interface for conman service operations
+// ConmanService defines the interface for conman service operations.
 type ConmanService interface {
 	ConfigureConman(nodes map[string]*nodes.NodeConsoleInfo, passwords map[string]compcreds.CompCredentials, sshConsoleKeyPath string) (bool, error)
 	ExecuteConman() error
@@ -36,14 +34,14 @@ type ConmanService interface {
 	SignalConmanHUP() error
 }
 
-// CredsService defines the interface for credentials service operations
+// CredsService defines the interface for credentials service operations.
 type CredsService interface {
 	GetPasswordsWithRetries(ctx context.Context, bmcXNames []string, maxTries, waitSecs int) (map[string]compcreds.CompCredentials, error)
 	EnsureConsoleKeysPresent() (bool, error)
 	CheckForUpdates() (bool, error)
 }
 
-// LogsService defines the interface for logs service operations
+// LogsService defines the interface for logs service operations.
 type LogsService interface {
 	UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo) error
 	LogRotate(consoleLogsPath string) bool
@@ -223,8 +221,7 @@ func runConman(ctx context.Context, config remoteConsoleConfig, conmanService Co
 	}
 }
 
-func runService(config remoteConsoleConfig) error {
-
+func startRemoteConsoleRuntime(serviceCtx context.Context, config remoteConsoleConfig) error {
 	slog.Info("Remote console service starting")
 	// Set up the zombie killer
 	slog.Info("Starting zombie killer")
@@ -252,9 +249,6 @@ func runService(config remoteConsoleConfig) error {
 	if _, err := credsService.EnsureConsoleKeysPresent(); err != nil {
 		slog.Warn("Failed to ensure console SSH keys present", "error", err)
 	}
-
-	// Create service context for coordinating shutdown of background goroutines
-	serviceCtx, serviceStopCtx := context.WithCancel(context.Background())
 
 	// Configure HTTP client for SMD requests
 	var smdHTTPClient *http.Client
@@ -328,67 +322,11 @@ func runService(config remoteConsoleConfig) error {
 			// JWKS URL was explicitly provided but we couldn't fetch it
 			// This is a fatal error - don't start with unprotected endpoints
 			slog.Error("Failed to initialize JWT authentication after all retries - refusing to start with unprotected endpoints")
-			serviceStopCtx()
 			return fmt.Errorf("failed to fetch JWKS from %s: %w", config.JwksURL, lastErr)
 		}
 	} else {
 		slog.Warn("No JWKS URL provided - JWT authentication is disabled")
 	}
-
-	// Setup a channel to wait for the os to tell us to stop.
-	// NOTE - This must be set up before initializing anything that needs
-	//  to be cleaned up.  This will trap any signals and wait to
-	//  process them until the channel is read.
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-
-	router := console.SetupRoutes(conmanLogsPath)
-
-	slog.Info("Starting HTTP server", "address", config.HttpListen)
-	server := &http.Server{Addr: config.HttpListen, Handler: router}
-
-	// Signal to cleanly shut down
-	go func() {
-
-		// NOTE: do not use log.Fatal as that will immediately exit
-		// the program and short-circuit the shutdown logic below
-		slog.Info("Server started", "result", server.ListenAndServe())
-	}()
-
-	serverCtx, serverStopCtx := context.WithCancel(context.Background())
-
-	// Listen for syscall signals for process to interrupt/quit
-	go func() {
-		sig := <-sigs
-		slog.Info("Detected signal to close service", "signal", sig)
-
-		// Cancel service context to stop background goroutines
-		serviceStopCtx()
-
-		// Shutdown signal with grace period of 30 seconds
-		shutdownCtx, shutdownCtxCancel := context.WithTimeout(context.Background(), 30*time.Second)
-
-		go func() {
-			<-shutdownCtx.Done()
-			if shutdownCtx.Err() == context.DeadlineExceeded {
-				shutdownCtxCancel()
-				slog.Error("Graceful shutdown timed out, forcing exit")
-				os.Exit(1)
-			}
-		}()
-
-		// Trigger graceful shutdown
-		err := server.Shutdown(shutdownCtx)
-		if err != nil {
-			slog.Error("Failed to shutdown HTTP server gracefully", "error", err)
-			os.Exit(1)
-		}
-		serverStopCtx()
-	}()
-
-	// Wait for server context to be stopped
-	<-serverCtx.Done()
-	slog.Info("Shutdown complete")
 
 	return nil
 }

@@ -9,9 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // Rate limiter constants for console output
@@ -31,7 +30,12 @@ func drainAndCloseRequestBody(req *http.Request) {
 }
 
 func extractNodeId(r *http.Request) (string, error) {
-	nodeID := chi.URLParam(r, "nodeID")
+	const consolePathPrefix = routePrefix + "/consoles/"
+
+	nodeID := strings.TrimPrefix(r.URL.Path, consolePathPrefix)
+	if nodeID == r.URL.Path || strings.Contains(nodeID, "/") {
+		nodeID = ""
+	}
 	if nodeID == "" {
 		slog.Error("Failed to extract node ID from request", "path", r.URL.Path)
 		return "", fmt.Errorf("unable to extract node ID")

@@ -8,7 +8,7 @@ before:
 
 builds:
   - id: remote-console
-    main: ./cmd/remote-console
+    main: ./cmd/server
     binary: remote-console
     goos:
       - linux

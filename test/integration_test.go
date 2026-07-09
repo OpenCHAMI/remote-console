@@ -29,7 +29,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/network"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/OpenCHAMI/remote-console/internal/console"
+	v1 "github.com/OpenCHAMI/remote-console/apis/remote-console.openchami.io/v1"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
@@ -278,9 +278,7 @@ func (s *IntegrationTestSuite) TearDownSuite() {
 }
 
 func (s *IntegrationTestSuite) TestHealthCheck() {
-	var healthResponse console.HealthResponse
-
-	resp, err := http.Get(s.apiURL + "/remote-console/health")
+	resp, err := http.Get(s.apiURL + "/health")
 	s.Require().NoError(err)
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -289,31 +287,11 @@ func (s *IntegrationTestSuite) TestHealthCheck() {
 	}()
 	s.Equal(http.StatusOK, resp.StatusCode)
 
+	var healthResponse map[string]string
 	err = json.NewDecoder(resp.Body).Decode(&healthResponse)
 	s.Require().NoError(err)
-	s.Equal("5", healthResponse.NumberConsoles)
-}
-
-func (s *IntegrationTestSuite) TestReadinessCheck() {
-	resp, err := http.Get(s.apiURL + "/remote-console/readiness")
-	s.Require().NoError(err)
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			s.T().Logf("Warning: failed to close response body: %v", err)
-		}
-	}()
-	s.Equal(http.StatusNoContent, resp.StatusCode)
-}
-
-func (s *IntegrationTestSuite) TestLivenessCheck() {
-	resp, err := http.Get(s.apiURL + "/remote-console/liveness")
-	s.Require().NoError(err)
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			s.T().Logf("Warning: failed to close response body: %v", err)
-		}
-	}()
-	s.Equal(http.StatusNoContent, resp.StatusCode)
+	s.Equal("healthy", healthResponse["status"])
+	s.Equal("remote-console", healthResponse["service"])
 }
 
 // sortByID sorts a slice of any type that has an ID field
@@ -321,6 +299,29 @@ func sortByID[T any](slice []T, getID func(T) string) {
 	sort.Slice(slice, func(i, j int) bool {
 		return getID(slice[i]) < getID(slice[j])
 	})
+}
+
+func decodeConsoleResources(body io.Reader) ([]nodes.NodeConsoleInfo, error) {
+	var resources []v1.Console
+	if err := json.NewDecoder(body).Decode(&resources); err != nil {
+		return nil, err
+	}
+
+	consoles := make([]nodes.NodeConsoleInfo, 0, len(resources))
+	for _, resource := range resources {
+		id := resource.Metadata.Name
+		if id == "" {
+			id = resource.Metadata.UID
+		}
+		consoles = append(consoles, nodes.NodeConsoleInfo{
+			ID:                  id,
+			ConnectionType:      resource.Spec.ConnectionType,
+			ConnectionHost:      resource.Spec.ConnectionHost,
+			ConnectionPort:      resource.Spec.ConnectionPort,
+			ConsoleEntryCommand: resource.Spec.ConsoleEntryCommand,
+		})
+	}
+	return consoles, nil
 }
 
 // TestConsoleNodesDiscovered verifies nodes are discovered from SMD
@@ -334,19 +335,18 @@ func (s *IntegrationTestSuite) TestConsoles() {
 	}()
 	s.Equal(http.StatusOK, resp.StatusCode)
 
-	var consolesResponse console.ConsolesResponse
-	err = json.NewDecoder(resp.Body).Decode(&consolesResponse)
+	consoles, err := decodeConsoleResources(resp.Body)
 	s.Require().NoError(err)
 
 	// 2 SSH password nodes, 2 SSH key nodes, 1 IPMI node
-	s.Require().Equal(len(consolesResponse.Consoles), 5, "Expected 5 consoles")
+	s.Require().Equal(5, len(consoles), "Expected 5 consoles")
 
 	sshPasswordFixture := consoleFixtures["ssh-password"]
 	sshKeyFixture := consoleFixtures["ssh-key"]
 	ipmiFixture := consoleFixtures["ipmi"]
 	entryCmd := "echo 'Hello n0' && /bin/sh"
 
-	consoles := []nodes.NodeConsoleInfo{
+	expectedConsoles := []nodes.NodeConsoleInfo{
 		{
 			ID:             sshPasswordFixture.nodeID,
 			ConnectionType: "ssh",
@@ -382,10 +382,10 @@ func (s *IntegrationTestSuite) TestConsoles() {
 	}
 
 	// Sort both slices for comparison
-	sortByID(consolesResponse.Consoles, func(n nodes.NodeConsoleInfo) string { return n.ID })
 	sortByID(consoles, func(n nodes.NodeConsoleInfo) string { return n.ID })
+	sortByID(expectedConsoles, func(n nodes.NodeConsoleInfo) string { return n.ID })
 
-	s.Equal(consoles, consolesResponse.Consoles, "Consoles do not match expected consoles")
+	s.Equal(expectedConsoles, consoles, "Consoles do not match expected consoles")
 
 }
 
@@ -569,9 +569,8 @@ func (s *IntegrationTestSuite) waitForConsoles(expected int, timeout time.Durati
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(s.apiURL + "/remote-console/consoles")
 		if err == nil {
-			var consolesResp console.ConsolesResponse
-			if decodeErr := json.NewDecoder(resp.Body).Decode(&consolesResp); decodeErr == nil {
-				if len(consolesResp.Consoles) == expected {
+			if consoles, decodeErr := decodeConsoleResources(resp.Body); decodeErr == nil {
+				if len(consoles) == expected {
 					if err := resp.Body.Close(); err != nil {
 						s.T().Logf("Warning: failed to close response body: %v", err)
 					}
@@ -594,9 +593,8 @@ func (s *IntegrationTestSuite) waitForConsoleID(nodeID string, timeout time.Dura
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(s.apiURL + "/remote-console/consoles")
 		if err == nil {
-			var consolesResp console.ConsolesResponse
-			if decodeErr := json.NewDecoder(resp.Body).Decode(&consolesResp); decodeErr == nil {
-				for _, consoleInfo := range consolesResp.Consoles {
+			if consoles, decodeErr := decodeConsoleResources(resp.Body); decodeErr == nil {
+				for _, consoleInfo := range consoles {
 					if consoleInfo.ID == nodeID {
 						if err := resp.Body.Close(); err != nil {
 							s.T().Logf("Warning: failed to close response body: %v", err)
@@ -620,11 +618,10 @@ func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(s.apiURL + "/remote-console/consoles")
 		if err == nil {
-			var consolesResp console.ConsolesResponse
-			if decodeErr := json.NewDecoder(resp.Body).Decode(&consolesResp); decodeErr == nil {
+			if consoles, decodeErr := decodeConsoleResources(resp.Body); decodeErr == nil {
 				found := false
 
-				for _, consoleInfo := range consolesResp.Consoles {
+				for _, consoleInfo := range consoles {
 					if consoleInfo.ID == nodeID {
 						found = true
 						break
