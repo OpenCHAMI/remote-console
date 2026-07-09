@@ -29,7 +29,7 @@ require (
 	github.com/Cray-HPE/hms-securestorage v1.18.0
 	github.com/OpenCHAMI/jwtauth/v5 v5.0.0-20240321222802-e6cb468a2a18
 	github.com/creack/pty v1.1.24
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.4
 	github.com/gorilla/websocket v1.5.0
 	github.com/lestrrat-go/jwx v1.2.31
 	github.com/nxadm/tail v1.4.11
