@@ -1,0 +1,10 @@
+groups:
+  - name: remote-console.openchami.io
+    storageVersion: v1
+    versions:
+      - v1
+    resources:
+      Console:
+        path: /remote-console/consoles
+        operations:
+          - list

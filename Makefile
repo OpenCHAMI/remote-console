@@ -8,8 +8,10 @@ VERSION ?= $(shell git describe --tags --always --abbrev=0)
 GOLANGCI_LINT ?= golangci-lint
 GO_PACKAGES ?= ./...
 TEST_PACKAGES ?= $(GO_PACKAGES)
+FABRICA ?= go run github.com/openchami/fabrica/cmd/fabrica
+FABRICA_GENERATE_ARGS ?=
 
-.PHONY: all lint test image
+.PHONY: all lint test image generate format-generated
 
 all : lint image
 
@@ -22,3 +24,11 @@ test:
 
 image:
 		docker build --pull $(DOCKER_ARGS) --tag '$(NAME):$(VERSION)' .
+
+generate:
+		$(FABRICA) generate $(FABRICA_GENERATE_ARGS)
+		$(MAKE) format-generated
+
+format-generated:
+		@files=$$(find apis cmd/server pkg/resources -name '*.go' -type f 2>/dev/null); \
+		if [ -n "$$files" ]; then gofmt -w $$files; fi

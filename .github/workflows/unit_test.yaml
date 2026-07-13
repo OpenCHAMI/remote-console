@@ -15,5 +15,5 @@ jobs:
           go-version-file: go.mod
       - name: Run unit tests
         run: |
-          # Exclude the integration tests
-          go test ./internal/...
+          # Exclude Docker-backed integration tests in ./test.
+          go test ./apis/... ./cmd/... ./internal/... ./pkg/...

@@ -1,0 +1,42 @@
+// Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+//
+// SPDX-License-Identifier: MIT
+//
+// This file contains the user-editable authorization tuple classifier.
+//
+// ✅ This file is safe to edit: it will NOT be overwritten by regeneration.
+//
+// The AuthZ middleware calls ClassifyRequestForAuthZ to derive a tuple used for
+// policy enforcement and decision logging.
+package main
+
+import "net/http"
+
+// ClassifyRequestForAuthZ returns (subject, object, action, protected, ok, reason).
+//
+// Semantics:
+//   - ok=false indicates the request could not be classified reliably.
+//   - enforce mode: treated like deny (403), reason logged.
+//   - shadow mode: decision logged, request allowed.
+//   - protected indicates whether the request should be AuthZ-protected.
+//     Public endpoints should already bypass AuthZ structurally, but protected is
+//     retained for future extension and custom routing.
+//
+// Default implementation notes:
+//   - subject: derived from TokenSmith claims in request context (wired by middleware).
+//   - object: prefers chi's RoutePattern (stable across path params); falls back to r.URL.Path.
+//   - action: r.Method.
+//
+// Example tuples (object/action):
+//   - ("/bmcs", "GET")
+//   - ("/bmcs/{uid}", "DELETE")
+//   - ("/bmcs/{uid}/status", "PATCH")
+func ClassifyRequestForAuthZ(r *http.Request) (subject, object, action string, protected, ok bool, reason string) {
+	subject, object, action, protected, ok, reason = DefaultClassifyRequestForAuthZ(r)
+	if isConsoleWebSocketRequest(r) && isConsoleWebSocketPath(r.URL.Path) {
+		object = "/remote-console/consoles/{uid}"
+		reason = "object derived from remote console websocket path"
+		ok = subject != "" && action != ""
+	}
+	return subject, object, action, protected, ok, reason
+}

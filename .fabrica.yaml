@@ -1,0 +1,39 @@
+project:
+    name: remote-console
+    module: github.com/OpenCHAMI/remote-console
+    description: OpenCHAMI remote console service
+    created: 2026-07-08T18:41:14.860713878Z
+features:
+    validation:
+        enabled: true
+        mode: strict
+    events:
+        enabled: false
+        bus_type: memory
+    conditional:
+        enabled: true
+        etag_algorithm: sha256
+    auth:
+        enabled: true
+    storage:
+        enabled: false
+        type: file
+        db_driver: sqlite3
+    reconciliation:
+        enabled: false
+        worker_count: 5
+        requeue_delay: 5
+    security:
+        authn:
+            enabled: true
+        authz:
+            enabled: false
+            mode: enforce
+generation:
+    handlers: true
+    storage: false
+    client: false
+    openapi: true
+    events: false
+    middleware: true
+    reconciliation: false

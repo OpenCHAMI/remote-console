@@ -153,7 +153,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: final
+    command: ["serve"]
+    working_dir: /tmp
     environment:
+      REMOTE_CONSOLE_AUTH_ENABLED: "false"
       RCS_SMD_URL: "http://smd:27779"
       SMS_SERVER: "http://smd:27779"
       CRAY_VAULT_AUTH_PATH: "auth/token/create"

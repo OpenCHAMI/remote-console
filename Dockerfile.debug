@@ -1,4 +1,4 @@
-FROM golang:1.24-bookworm
+FROM golang:1.26-bookworm
 
 # Configure go env
 ENV GOPATH=/usr/local/golib
@@ -8,14 +8,16 @@ RUN export CGO_ENABLED=0
 
 # Copy source files
 COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
+COPY apis $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/apis
 COPY configs configs
 COPY scripts scripts
 COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
+COPY pkg $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/pkg
 COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
 COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
 
 # Build the image
-RUN go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v \
+RUN go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/server -v \
     -gcflags=all="-N -l" \
     -o /usr/local/bin/remote-console
 

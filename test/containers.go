@@ -493,6 +493,7 @@ func startRemoteConsoleWithEnv(ctx context.Context, envOverrides map[string]stri
 			},
 		},
 		Env: map[string]string{
+			"REMOTE_CONSOLE_AUTH_ENABLED":            "false",
 			"RCS_SMD_URL":                            "http://smd:27779",
 			"SMS_SERVER":                             "http://smd:27779",
 			"CRAY_VAULT_AUTH_PATH":                   "auth/token/create",
@@ -518,10 +519,10 @@ func startRemoteConsoleWithEnv(ctx context.Context, envOverrides map[string]stri
 			"RCS_LOG_ROTATE_STATE_FILE_PATH": "/tmp/rot_conman.state",
 		},
 		ExposedPorts: []string{"26776/tcp"},
-		WaitingFor: wait.ForHTTP("/remote-console/readiness").
+		WaitingFor: wait.ForHTTP("/health").
 			WithPort("26776/tcp").
 			WithStatusCodeMatcher(func(status int) bool {
-				return status == http.StatusNoContent
+				return status == http.StatusOK
 			}).
 			WithStartupTimeout(120 * time.Second),
 	}
