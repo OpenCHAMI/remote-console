@@ -54,7 +54,7 @@ func startVault(ctx context.Context, networks ...string) (testcontainers.Contain
 		},
 	}))
 
-	return vault.Run(ctx, "vault:1.5.5", opts...)
+	return vault.Run(ctx, "vault:1.13.3", opts...)
 }
 
 // enableVaultKV enables KV store in Vault
