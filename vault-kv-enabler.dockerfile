@@ -20,7 +20,7 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 
-FROM docker.io/library/vault:1.5.5
+FROM docker.io/library/vault:1.13.3
 
 LABEL maintainer="Hewlett Packard Enterprise"
 
