@@ -50,7 +50,7 @@ services:
       - rcs-network
 
   smd-init:
-    image: ghcr.io/openchami/smd:v2.19.2
+    image: ghcr.io/openchami/smd:v2.20.4
     environment:
       SMD_DBHOST: "postgres"
       SMD_DBPORT: "5432"
@@ -66,7 +66,7 @@ services:
       - rcs-network
 
   smd:
-    image: ghcr.io/openchami/smd:v2.19.2
+    image: ghcr.io/openchami/smd:v2.20.4
     environment:
       SMD_DBHOST: "postgres"
       SMD_DBPORT: "5432"
