@@ -38,7 +38,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/vault v0.40.0
-	github.com/urfave/cli/v3 v3.5.0
+	github.com/urfave/cli/v3 v3.10.1
 	github.com/urfave/sflags v0.4.1
 	golang.org/x/crypto v0.52.0
 	golang.org/x/oauth2 v0.34.0
