@@ -8,7 +8,7 @@
 ### goreleaser Stage ###
 ### Assume goreleaser has already compiled the binary and written it to ./remote-console
 
-FROM ubuntu:24.04 AS ubuntu-goreleaser
+FROM ubuntu:26.04 AS ubuntu-goreleaser
 
 ARG TARGETPLATFORM
 
@@ -54,7 +54,7 @@ COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
 RUN set -ex && go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v -o /usr/local/bin/remote-console
 
 ### Final Stage ###
-FROM ubuntu:24.04 AS final
+FROM ubuntu:26.04 AS final
 
 # Install needed packages
 RUN set -eux \
