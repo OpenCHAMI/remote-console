@@ -42,7 +42,7 @@ require (
 	github.com/urfave/sflags v0.4.1
 	golang.org/x/crypto v0.52.0
 	golang.org/x/oauth2 v0.34.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
