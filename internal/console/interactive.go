@@ -6,6 +6,7 @@ package console
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -161,9 +162,15 @@ func (s *interactiveConsoleSession) streamInput(ctx context.Context) {
 		}
 
 		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
-			// Both backends return len(p), nil when disconnected (silent drop),
-			// so write errors here indicate a genuine problem worth logging.
 			if _, err := s.io.Write(message); err != nil {
+				if errors.Is(err, errNotConnected) {
+					// The backend is between connections. Discard the input and
+					// keep the client attached — it reconnects on its own, and
+					// the client sees the reconnect marker on the output stream.
+					slog.Debug("Dropped console input, backend not connected",
+						"nodeID", s.nodeID, "bytes", len(message))
+					continue
+				}
 				slog.Error("Failed to write to console backend", "nodeID", s.nodeID, "error", err)
 				s.closeWithReason(sessionCloseError, "failed to write to console")
 				return
@@ -201,6 +208,29 @@ func newInteractiveConsoleSession(nodeID string, conn *websocket.Conn, cio conso
 	return session
 }
 
+// newConsoleIO selects the SSH or ConMan backend for a node.
+func newConsoleIO(node *nodes.NodeConsoleInfo, sshMgr *ssh.SSHConsoleManager) (consoleIO, error) {
+	switch node.ConnectionType {
+	case nodes.SSH:
+		cio, err := newSSHConsoleIO(node.ID, sshMgr)
+		if err != nil {
+			return nil, err
+		}
+		return cio, nil
+
+	case nodes.IPMI:
+		cio, err := newConmanConsoleIO(node.ID)
+		if err != nil {
+			return nil, err
+		}
+		return cio, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported console connection type %q for node %s",
+			node.ConnectionType, node.ID)
+	}
+}
+
 func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, r *http.Request, sshMgr *ssh.SSHConsoleManager) {
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
@@ -212,7 +242,7 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 	}
 
 	// Make sure we are monitoring a valid node
-	node := nodes.CurrentNodes()[nodeID]
+	node := nodes.CurrentNode(nodeID)
 	if node == nil {
 		http.Error(w, "Node doesn't exist", http.StatusNotFound)
 		return
@@ -236,17 +266,15 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 	}
 
 	// From here on, errors must be sent via WebSocket close frames
-	var cio consoleIO
-	if useSSH {
-		cio, err = newSSHConsoleIO(nodeID, sshMgr)
-	} else {
-		cio, err = newConmanConsoleIO(nodeID)
-	}
+	cio, err := newConsoleIO(node, sshMgr)
 	if err != nil {
 		slog.Error("Failed to create console IO backend", "nodeID", nodeID, "error", err)
 		_ = conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "failed to connect to console"))
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			slog.Debug("Failed to close WebSocket after backend error",
+				"nodeID", nodeID, "error", closeErr)
+		}
 		return
 	}
 

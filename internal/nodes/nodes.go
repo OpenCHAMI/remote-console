@@ -7,7 +7,6 @@ package nodes
 
 // Package nodes manages node discovery and state from HSM
 
-
 import (
 	"context"
 	"encoding/json"
@@ -326,12 +325,17 @@ func CurrentNodes() map[string]*NodeConsoleInfo {
 	return nodesCopy
 }
 
-func IsCurrentNode(nodeID string) bool {
+func CurrentNode(nodeID string) *NodeConsoleInfo {
 	currNodesMutex.Lock()
 	defer currNodesMutex.Unlock()
 
-	_, ok := currentNodes[nodeID]
-	return ok
+	node := currentNodes[nodeID]
+	if node == nil {
+		return nil
+	}
+	nodeCopy := *node
+
+	return &nodeCopy
 }
 
 func GetHardwareUpdateTime() string {

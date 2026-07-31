@@ -5,6 +5,7 @@
 package console
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -20,7 +21,7 @@ func generateClientID() string {
 	return strconv.FormatUint(clientIDCounter.Add(1), 10)
 }
 
-// sshConsoleIO implements consoleIO backed by an SSHConsoleNode attachment.
+// sshConsoleIO implements consoleIO backed by an SSHConsole attachment.
 type sshConsoleIO struct {
 	nodeID    string
 	clientID  string
@@ -46,7 +47,15 @@ func newSSHConsoleIO(nodeID string, manager *ssh.SSHConsoleManager) (*sshConsole
 func (s *sshConsoleIO) Output() <-chan []byte { return s.out }
 
 func (s *sshConsoleIO) Write(p []byte) (int, error) {
-	return s.manager.Write(s.nodeID, p)
+	n, err := s.manager.Write(s.nodeID, p)
+	if errors.Is(err, ssh.ErrNotConnected) {
+		// Restate the manager's sentinel as the consoleIO one so the session
+		// loop can recognise it without knowing which backend it holds. Wrapping
+		// still lets errors.Is find ssh.ErrNotConnected and keeps the
+		// backend-specific detail.
+		return n, fmt.Errorf("%w: %w", errNotConnected, err)
+	}
+	return n, err
 }
 
 func (s *sshConsoleIO) Close() error {

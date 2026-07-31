@@ -156,3 +156,21 @@ func TestUpdateNodesNoChange(t *testing.T) {
 	require.Contains(t, currentNodes, "x0c0s1b0")
 	require.Contains(t, currentNodes, "x0c0s1b1")
 }
+
+func TestCurrentNode(t *testing.T) {
+	resetCurrentNodes()
+	t.Cleanup(resetCurrentNodes)
+
+	updateNodes([]NodeConsoleInfo{
+		{ID: "ipmi", ConnectionType: IPMI},
+		{ID: "ssh", ConnectionType: SSH},
+	})
+
+	node := CurrentNode("ipmi")
+	require.NotNil(t, node)
+	require.Equal(t, IPMI, node.ConnectionType)
+	require.Nil(t, CurrentNode("missing"))
+
+	node.ConnectionType = SSH
+	require.Equal(t, IPMI, CurrentNode("ipmi").ConnectionType)
+}
