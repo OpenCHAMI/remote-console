@@ -82,9 +82,7 @@ func TestSSHConsoleManagerConcurrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatalf("initial UpdateNodes: %v", err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	// Wait until all nodes are registered (Attach succeeds) before starting workers.
 	deadline := time.Now().Add(30 * time.Second)
@@ -213,15 +211,17 @@ func TestSSHConsoleManagerConcurrent(t *testing.T) {
 				}
 			}
 			subMap := makeNodeMap(subset)
-			if err := manager.UpdateNodes(ctx, subMap, makePasswords(subset)); err != nil {
+			if err := manager.UpdateNodes(ctx, subMap); err != nil {
 				t.Errorf("UpdateNodes (subset): %v", err)
 			}
+			manager.UpdateCredentials(makePasswords(subset))
 			time.Sleep(20 * time.Millisecond)
 
 			// Restore the full set.
-			if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
+			if err := manager.UpdateNodes(ctx, nodeMap); err != nil {
 				t.Errorf("UpdateNodes (full): %v", err)
 			}
+			manager.UpdateCredentials(passwords)
 			time.Sleep(20 * time.Millisecond)
 		}
 	}()
