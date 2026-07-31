@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	compcredentials "github.com/Cray-HPE/hms-compcredentials"
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
@@ -34,9 +33,7 @@ func TestSSHConsoleReconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	// Attach before the first connect so we capture the initial connected marker.
 	clientCh, err := manager.Attach(id, "reconnect-client")
@@ -75,9 +72,7 @@ func TestSSHConsoleFanOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	const numClients = 5
 	clients := make([]<-chan []byte, numClients)
@@ -145,9 +140,7 @@ func TestSSHConsoleDataFlow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	clientCh, err := manager.Attach(id, "data-client")
 	if err != nil {
@@ -201,9 +194,7 @@ func TestSSHConsoleLifecycle(t *testing.T) {
 
 	goroutinesBefore := runtime.NumGoroutine()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	// Wait for the node to connect.
 	<-sessionCh
@@ -211,7 +202,7 @@ func TestSSHConsoleLifecycle(t *testing.T) {
 
 	// Remove the node. The manager is the sole authority on node lifetime, so
 	// cancelling through UpdateNodes must be enough to stop Run.
-	if err := manager.UpdateNodes(ctx, map[string]*nodes.NodeConsoleInfo{}, map[string]compcredentials.CompCredentials{}); err != nil {
+	if err := manager.UpdateNodes(ctx, map[string]*nodes.NodeConsoleInfo{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -254,9 +245,7 @@ func TestSlowClientGetsDropNotice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	clientCh, err := manager.Attach(id, "slow-client")
 	if err != nil {
