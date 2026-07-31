@@ -79,6 +79,7 @@ func TestSSHConsoleManagerConcurrent(t *testing.T) {
 	cfg.ReconnectMaxInterval = 500 * time.Millisecond
 
 	manager := ssh.NewSSHConsoleManager(cfg, "", t.TempDir())
+	waitOnCleanup(t, manager)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
