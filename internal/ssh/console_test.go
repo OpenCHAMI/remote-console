@@ -12,20 +12,13 @@ import (
 	"testing"
 	"time"
 
-	compcredentials "github.com/Cray-HPE/hms-compcredentials"
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
-// ---------------------------------------------------------------------------
-// 1. Reconnect on disconnect
-// ---------------------------------------------------------------------------
-
-// TestSSHConsoleNodeReconnect verifies that when the server drops a connection
-// the node broadcasts a disconnect marker, then reconnects automatically and
-// broadcasts a connected marker.
-func TestSSHConsoleNodeReconnect(t *testing.T) {
+// TestSSHConsoleReconnect verifies automatic reconnection and status markers.
+func TestSSHConsoleReconnect(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
 	id, nodeMap, passwords := singleNode(t, srv.addr())
@@ -34,9 +27,7 @@ func TestSSHConsoleNodeReconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	// Attach before the first connect so we capture the initial connected marker.
 	clientCh, err := manager.Attach(id, "reconnect-client")
@@ -48,25 +39,16 @@ func TestSSHConsoleNodeReconnect(t *testing.T) {
 	sess := <-sessionCh
 	waitForMarker(t, clientCh, fmt.Sprintf("[Console %s connected at", id), 15*time.Second)
 
-	// Drop the connection server-side.
 	sess.drop()
 
-	// Node should broadcast a disconnect marker.
 	waitForMarker(t, clientCh, fmt.Sprintf("[Console %s disconnected at", id), 15*time.Second)
 
-	// Server accepts the reconnect; node should broadcast another connected marker.
 	<-sessionCh
 	waitForMarker(t, clientCh, fmt.Sprintf("[Console %s connected at", id), 15*time.Second)
 }
 
-// ---------------------------------------------------------------------------
-// 2. Fan-out broadcast to multiple clients
-// ---------------------------------------------------------------------------
-
-// TestSSHConsoleNodeFanOut verifies that output from the SSH session is
-// delivered to every attached client and that a slow client (full buffer)
-// only loses its own data — it does not block other clients.
-func TestSSHConsoleNodeFanOut(t *testing.T) {
+// TestSSHConsoleFanOut verifies output reaches all clients independently.
+func TestSSHConsoleFanOut(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
 	id, nodeMap, passwords := singleNode(t, srv.addr())
@@ -75,9 +57,7 @@ func TestSSHConsoleNodeFanOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	const numClients = 5
 	clients := make([]<-chan []byte, numClients)
@@ -97,15 +77,13 @@ func TestSSHConsoleNodeFanOut(t *testing.T) {
 		waitForMarker(t, ch, fmt.Sprintf("[Console %s connected at", id), 15*time.Second)
 	}
 
-	// Server sends a known payload; every client must receive it.
 	sess.send <- []byte("broadcast-test-payload\r\n")
 	for i, ch := range clients {
 		waitForMarker(t, ch, "broadcast-test-payload", 5*time.Second)
 		t.Logf("client %d received payload", i)
 	}
 
-	// Slow-client test: fill one client's buffer so it is full, then verify
-	// the fast client still receives new data unimpeded.
+	// A full client buffer must not block another client.
 	slowCh, err := manager.Attach(id, "slow-client")
 	if err != nil {
 		t.Fatal(err)
@@ -122,21 +100,15 @@ func TestSSHConsoleNodeFanOut(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		sess.send <- filler
 	}
-	time.Sleep(200 * time.Millisecond) // let broadcast goroutine saturate the slow client
+	time.Sleep(200 * time.Millisecond) // allow the slow client buffer to fill
 
 	sess.send <- []byte("after-slow-client-fill\r\n")
 	waitForMarker(t, fastCh, "after-slow-client-fill", 5*time.Second)
-	_ = slowCh // slow client may have dropped data — expected behaviour
+	_ = slowCh // slow client may have dropped data
 }
 
-// ---------------------------------------------------------------------------
-// 3. Data flow: output reaches clients, input reaches server
-// ---------------------------------------------------------------------------
-
-// TestSSHConsoleNodeDataFlow verifies that bytes written by the server arrive
-// in the client channel (output path) and bytes written by the client arrive
-// at the server's stdin (input path).
-func TestSSHConsoleNodeDataFlow(t *testing.T) {
+// TestSSHConsoleDataFlow verifies input and output forwarding.
+func TestSSHConsoleDataFlow(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
 	id, nodeMap, passwords := singleNode(t, srv.addr())
@@ -145,9 +117,7 @@ func TestSSHConsoleNodeDataFlow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	clientCh, err := manager.Attach(id, "data-client")
 	if err != nil {
@@ -158,11 +128,9 @@ func TestSSHConsoleNodeDataFlow(t *testing.T) {
 	sess := <-sessionCh
 	waitForMarker(t, clientCh, fmt.Sprintf("[Console %s connected at", id), 15*time.Second)
 
-	// Output path: server → client.
 	sess.send <- []byte("hello-from-server\r\n")
 	waitForMarker(t, clientCh, "hello-from-server", 5*time.Second)
 
-	// Input path: client → server.
 	if _, err := manager.Write(id, []byte("hello-from-client\r\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -184,14 +152,8 @@ func TestSSHConsoleNodeDataFlow(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 4. Node lifecycle via UpdateNodesAndCredentials
-// ---------------------------------------------------------------------------
-
-// TestSSHConsoleNodeLifecycle verifies that removing a node via
-// UpdateNodesAndCredentials cancels its Run goroutine and that all associated
-// goroutines exit cleanly.
-func TestSSHConsoleNodeLifecycle(t *testing.T) {
+// TestSSHConsoleLifecycle verifies node removal stops its goroutines.
+func TestSSHConsoleLifecycle(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
 	id, nodeMap, passwords := singleNode(t, srv.addr())
@@ -202,21 +164,16 @@ func TestSSHConsoleNodeLifecycle(t *testing.T) {
 
 	goroutinesBefore := runtime.NumGoroutine()
 
-	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
-	// Wait for the node to connect.
 	<-sessionCh
 	t.Logf("goroutines with node: %d (added %d)", runtime.NumGoroutine(), runtime.NumGoroutine()-goroutinesBefore)
 
-	// Remove the node. The manager is the sole authority on node lifetime, so
-	// cancelling through UpdateNodesAndCredentials must be enough to stop Run.
-	if err := manager.UpdateNodesAndCredentials(ctx, map[string]*nodes.NodeConsoleInfo{}, map[string]compcredentials.CompCredentials{}); err != nil {
+	// Removing the node must stop Run.
+	if err := manager.UpdateNodes(ctx, map[string]*nodes.NodeConsoleInfo{}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Attach should now fail.
 	if _, err := manager.Attach(id, "post-remove"); err == nil {
 		t.Error("Attach succeeded after node removal")
 	}
@@ -236,16 +193,7 @@ func TestSSHConsoleNodeLifecycle(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 6. Slow client accounting
-// ---------------------------------------------------------------------------
-
-// TestSlowClientGetsDropNotice covers the case where a client cannot keep up
-// with console output. The node has to discard the overflow — it will not stall
-// every other client and the log file to wait for one slow websocket — but
-// discarding it silently hands the operator a console stream with an
-// unmarked hole in it. The dropped bytes must be accounted for in the client's
-// own stream once it drains enough to receive the notice.
+// TestSlowClientGetsDropNotice verifies dropped output is reported in place.
 func TestSlowClientGetsDropNotice(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
@@ -255,9 +203,7 @@ func TestSlowClientGetsDropNotice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
-		t.Fatal(err)
-	}
+	startNodes(t, manager, ctx, nodeMap, passwords)
 
 	clientCh, err := manager.Attach(id, "slow-client")
 	if err != nil {
@@ -268,17 +214,8 @@ func TestSlowClientGetsDropNotice(t *testing.T) {
 	sess := <-sessionCh
 	waitForMarker(t, clientCh, fmt.Sprintf("[Console %s connected at", id), 15*time.Second)
 
-	// Flood the node while reading nothing. The server's writes are
-	// flow-controlled by the SSH window, which only advances as the node reads,
-	// so once every send has been accepted the node has consumed the lot — and
-	// with the client reading none of it, everything past the channel's depth
-	// must have been dropped.
-	//
-	// The burst has to beat that depth measured in broadcasts, not bytes.
-	// streamStdout reads up to 32KB at a time, so the worst case for this test
-	// is the sends coalescing into 32KB chunks: 24MB still yields ~750
-	// broadcasts against a channel that holds clientBufferDepth (256). Keep the
-	// margin if that constant grows.
+	// Send enough data to overflow the client buffer even with 32 KB reads.
+	// The SSH window confirms accepted data was consumed by the console.
 	const (
 		bursts    = 1500
 		chunkSize = 16 * 1024
@@ -295,10 +232,7 @@ func TestSlowClientGetsDropNotice(t *testing.T) {
 		}
 	}
 
-	// Drain what the client did manage to buffer, keeping everything it saw.
-	// The notice may land here — as soon as the channel has room, the next
-	// broadcast carries it — or on the resume write below, so the assertions
-	// have to look at the whole stream rather than at one read.
+	// The notice may arrive while draining or after output resumes.
 	var seen strings.Builder
 	drained := 0
 drain:
@@ -337,8 +271,7 @@ drain:
 	if !strings.Contains(seen.String()[at:], "bytes of output dropped") {
 		t.Errorf("drop notice is not the expected marker: %q", seen.String()[at:min(at+120, seen.Len())])
 	}
-	// The notice has to sit at the gap. Behind the resumed output it would tell
-	// the operator the wrong thing about where the console skipped.
+	// The notice must precede resumed output.
 	if at > strings.Index(seen.String(), "back-in-sync") {
 		t.Error("drop notice arrived after the resumed output; it marks the wrong point in the stream")
 	}
