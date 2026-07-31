@@ -31,7 +31,7 @@ const smdHTTPTimeout = 15 * time.Second
 
 // ConmanService defines the interface for conman service operations
 type ConmanService interface {
-	ConfigureConman(nodes map[string]*nodes.NodeConsoleInfo, passwords map[string]compcreds.CompCredentials, sshConsoleKeyPath string) (bool, error)
+	ConfigureConman(nodes map[string]*nodes.NodeConsoleInfo, passwords map[string]compcreds.CompCredentials) (bool, error)
 	ExecuteConman() error
 	SignalConmanTERM() error
 	SignalConmanHUP() error
@@ -119,7 +119,7 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 					slog.Error("Failed to fetch credentials for updated nodes", "error", err)
 				} else {
 					// Regenerate conman config with the new node list and credentials.
-					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords, config.Creds.SshConsoleKeyPath); err != nil {
+					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords); err != nil {
 						slog.Error("Failed to reconfigure conman", "error", err)
 					}
 					// Update SSH nodes with current topology and credentials.
@@ -173,7 +173,7 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 					slog.Error("Failed to fetch updated credentials", "error", err)
 				} else {
 					// Regenerate conman config so IPMI nodes pick up the new credentials.
-					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords, config.Creds.SshConsoleKeyPath); err != nil {
+					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords); err != nil {
 						slog.Error("Failed to reconfigure conman with updated credentials", "error", err)
 					}
 					// Push updated credentials to SSH nodes.
@@ -238,7 +238,7 @@ func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService Co
 	}
 }
 
-func runConman(ctx context.Context, config remoteConsoleConfig, conmanService ConmanService, credService CredsService) {
+func runConman(ctx context.Context, conmanService ConmanService, credService CredsService) {
 	waitWithContext := func(d time.Duration) bool {
 		select {
 		case <-ctx.Done():
@@ -273,7 +273,7 @@ func runConman(ctx context.Context, config remoteConsoleConfig, conmanService Co
 			}
 		}
 
-		hasNodes, err := conmanService.ConfigureConman(ipmiNodes, passwords, config.Creds.SshConsoleKeyPath)
+		hasNodes, err := conmanService.ConfigureConman(ipmiNodes, passwords)
 		if err != nil {
 			slog.Error("Failed to configure conman", "error", err)
 			if waitWithContext(5 * time.Second) {
@@ -384,7 +384,7 @@ func runService(config remoteConsoleConfig) error {
 	go watchForNodesUpdates(serviceCtx, config, smdHTTPClient, conmanService, logsService, credsService, sshManager)
 
 	// goroutine to run conman
-	go runConman(serviceCtx, config, conmanService, credsService)
+	go runConman(serviceCtx, conmanService, credsService)
 
 	// goroutine watch for credential updates
 	go watchForCredUpdates(serviceCtx, config, credsService, conmanService, sshManager)
