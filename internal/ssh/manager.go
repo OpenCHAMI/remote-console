@@ -33,6 +33,8 @@ type SSHConsoleManager struct {
 	nodes   map[string]*SSHConsoleNode
 	// cancels maps nodeID to the cancel func for that node's Run goroutine.
 	cancels map[string]context.CancelFunc
+
+	// running tracks Run goroutines through final cleanup.
 	running sync.WaitGroup
 }
 
@@ -46,12 +48,6 @@ func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleMa
 		nodes:    make(map[string]*SSHConsoleNode),
 		cancels:  make(map[string]context.CancelFunc),
 	}
-}
-
-// Wait blocks until all console goroutines have stopped. The caller must first
-// cancel the context passed to UpdateNodes or remove every managed node.
-func (m *SSHConsoleManager) Wait() {
-	m.running.Wait()
 }
 
 // logPath returns the log file path for a node.
@@ -125,6 +121,12 @@ func (m *SSHConsoleManager) startNode(ctx context.Context, nodeID string, info *
 		defer m.running.Done()
 		node.Run(nodeCtx)
 	}()
+}
+
+// Wait blocks until all Run goroutines exit but does not stop them. Callers cancel their contexts
+// first and then wait for log cleanup.
+func (m *SSHConsoleManager) Wait() {
+	m.running.Wait()
 }
 
 // UpdateCredentials updates credentials for managed nodes present in passwords.
