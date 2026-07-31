@@ -177,8 +177,8 @@ func jitter(d time.Duration) time.Duration {
 // when the node leaves inventory, which makes the manager the single authority
 // on node lifetime. Run must not decide to stop on its own: the manager would
 // keep the node in its map with no goroutine behind it, so Attach would hand
-// back a channel that never delivers and no later UpdateNodes would revive it
-// (the node still "exists" and its parameters are unchanged).
+// back a channel that never delivers and no later update would revive it (the
+// node still "exists" and its parameters are unchanged).
 func (n *SSHConsoleNode) Run(ctx context.Context) {
 	var err error
 	n.logFile, err = os.OpenFile(n.logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)

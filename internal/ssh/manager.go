@@ -33,11 +33,11 @@ type SSHConsoleManager struct {
 	nodes   map[string]*SSHConsoleNode
 	// cancels maps nodeID to the cancel func for that node's Run goroutine.
 	cancels map[string]context.CancelFunc
+	running sync.WaitGroup
 }
 
-// NewSSHConsoleManager creates a new manager. keyPath is the SSH private key
-// path (may be empty if all nodes use password auth). logsPath is the directory
-// where per-node console log files are written.
+// NewSSHConsoleManager creates a manager from validated configuration. keyPath may be empty when
+// all nodes use password authentication. logsPath stores per-node console logs.
 func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleManager {
 	return &SSHConsoleManager{
 		cfg:      cfg,
@@ -46,6 +46,12 @@ func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleMa
 		nodes:    make(map[string]*SSHConsoleNode),
 		cancels:  make(map[string]context.CancelFunc),
 	}
+}
+
+// Wait blocks until all console goroutines have stopped. The caller must first
+// cancel the context passed to UpdateNodes or remove every managed node.
+func (m *SSHConsoleManager) Wait() {
+	m.running.Wait()
 }
 
 // logPath returns the log file path for a node.
@@ -65,15 +71,13 @@ func credsChanged(a, b compcredentials.CompCredentials) bool {
 	return a.Username != b.Username || a.Password != b.Password
 }
 
-// UpdateNodes diffs the provided SSH node map against the currently active set.
-// New nodes are started, removed nodes are cancelled, changed nodes are restarted,
-// and nodes with only credential changes get UpdateCreds called.
-// ctx must be the long-lived service context — node goroutines run until it is
-// cancelled or the node is explicitly stopped.
+// UpdateNodes syncs managed consoles with the provided SSH node set. It starts new nodes, stops
+// removed nodes, and restarts consoles when connection settings change. Existing nodes retain
+// their credentials. ctx controls console lifetime. New nodes use key authentication until
+// UpdateCredentials supplies a password.
 func (m *SSHConsoleManager) UpdateNodes(
 	ctx context.Context,
 	sshNodes map[string]*nodes.NodeConsoleInfo,
-	passwords map[string]compcredentials.CompCredentials,
 ) error {
 	m.nodesMu.Lock()
 	defer m.nodesMu.Unlock()
@@ -89,27 +93,19 @@ func (m *SSHConsoleManager) UpdateNodes(
 	}
 
 	for nodeID, info := range sshNodes {
-		creds := passwords[nodeID]
-
 		existing, exists := m.nodes[nodeID]
 		if !exists {
-			// New node.
-			m.startNode(ctx, nodeID, info, creds)
+			m.startNode(ctx, nodeID, info, compcredentials.CompCredentials{})
 			continue
 		}
 
 		if nodeChanged(existing.info, info) {
-			// Connection parameters changed — restart.
+			// Connection parameters changed — restart with the credentials the
+			// node is already using.
 			slog.Info("SSH console node parameters changed, restarting", "nodeID", nodeID)
+			creds := existing.currentCreds()
 			m.cancels[nodeID]()
 			m.startNode(ctx, nodeID, info, creds)
-			continue
-		}
-
-		if credsChanged(existing.creds, creds) {
-			// Credentials only — reconnect in place without full restart.
-			slog.Info("SSH console node credentials changed, reconnecting", "nodeID", nodeID)
-			existing.UpdateCreds(creds)
 		}
 	}
 
@@ -124,11 +120,15 @@ func (m *SSHConsoleManager) startNode(ctx context.Context, nodeID string, info *
 	m.nodes[nodeID] = node
 	m.cancels[nodeID] = nodeCancel
 	slog.Info("Starting SSH console node", "nodeID", nodeID, "host", info.ConnectionHost)
-	go node.Run(nodeCtx)
+	m.running.Add(1)
+	go func() {
+		defer m.running.Done()
+		node.Run(nodeCtx)
+	}()
 }
 
-// UpdateCredentials updates credentials for nodes whose passwords have changed.
-// Nodes that changed connection info should use UpdateNodes instead.
+// UpdateCredentials updates credentials for managed nodes present in passwords.
+// Nodes absent from passwords retain their current credentials.
 func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentials.CompCredentials) {
 	m.nodesMu.RLock()
 	type pending struct {
@@ -138,7 +138,7 @@ func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentia
 	var updates []pending
 	for nodeID, node := range m.nodes {
 		if creds, ok := passwords[nodeID]; ok {
-			if credsChanged(node.creds, creds) {
+			if credsChanged(node.currentCreds(), creds) {
 				updates = append(updates, pending{node, creds})
 			}
 		}
