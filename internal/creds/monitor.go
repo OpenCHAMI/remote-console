@@ -10,6 +10,7 @@ package creds
 import (
 	"log/slog"
 
+	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
@@ -58,10 +59,22 @@ func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 	cs.passwordsMu.Lock()
 	defer cs.passwordsMu.Unlock()
 
+	// Retain previous credentials when a read omits an inventoried node.
+	refreshed := make(map[string]compcreds.CompCredentials, len(xnames))
+	for _, xname := range xnames {
+		if creds, ok := currentPasswords[xname]; ok {
+			refreshed[xname] = creds
+			continue
+		}
+		if previous, seen := cs.passwords[xname]; seen {
+			refreshed[xname] = previous
+		}
+	}
+
 	if cs.passwords == nil {
 		// Report a non-empty first read so ConMan receives initial credentials.
-		cs.passwords = currentPasswords
-		return len(currentPasswords) > 0, nil
+		cs.passwords = refreshed
+		return len(refreshed) > 0, nil
 	}
 
 	changed := false
@@ -86,8 +99,7 @@ func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 		}
 	}
 
-	// Replace rather than merge, so entries for departed nodes fall away.
-	cs.passwords = currentPasswords
+	cs.passwords = refreshed
 
 	return changed, nil
 }
