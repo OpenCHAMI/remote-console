@@ -60,20 +60,9 @@ type LogsService interface {
 // the concrete *ssh.SSHConsoleManager is passed to console.SetupRoutes, which
 // uses it directly.
 type SSHConsoleService interface {
-	UpdateNodes(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo) error
+	UpdateNodes(ctx context.Context, nodes map[string]*nodes.NodeConsoleInfo) error
 	UpdateCredentials(passwords map[string]compcreds.CompCredentials)
 	ReopenLogs()
-}
-
-// filterSSHNodes returns the subset of nodes with SSH connection type.
-func filterSSHNodes(allNodes map[string]*nodes.NodeConsoleInfo) map[string]*nodes.NodeConsoleInfo {
-	result := make(map[string]*nodes.NodeConsoleInfo)
-	for id, n := range allNodes {
-		if n.IsSSH() {
-			result[id] = n
-		}
-	}
-	return result
 }
 
 // filterIPMINodes returns the subset of nodes with IPMI connection type.
@@ -88,9 +77,9 @@ func filterIPMINodes(allNodes map[string]*nodes.NodeConsoleInfo) map[string]*nod
 }
 
 // filterXNames returns the xnames from a node map.
-func filterXNames(sshNodes map[string]*nodes.NodeConsoleInfo) []string {
-	xnames := make([]string, 0, len(sshNodes))
-	for id := range sshNodes {
+func filterXNames(nodes map[string]*nodes.NodeConsoleInfo) []string {
+	xnames := make([]string, 0, len(nodes))
+	for id := range nodes {
 		xnames = append(xnames, id)
 	}
 	return xnames
@@ -123,21 +112,15 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 
 				currentNodes := nodes.CurrentNodes()
 
-				// Membership first: this is the only thing a node change is
-				// actually reporting, and it needs no credentials to apply.
-				sshNodes := filterSSHNodes(currentNodes)
-				if err := sshService.UpdateNodes(ctx, sshNodes); err != nil {
+				if err := sshService.UpdateNodes(ctx, currentNodes); err != nil {
 					slog.Error("Failed to update SSH console nodes", "error", err)
 				}
 
-				// conman needs no help here. runConman regenerates conman.conf
-				// from the current node set and a fresh credential fetch every
-				// time conmand exits, so signalling it is the whole job.
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
 
-				// Update log rotation configuration.
+				// also update log rotation configuration
 				slog.Info("Updating log rotation configuration for node changes")
 				if err := logsService.UpdateLogRotateConf(consoleLogsPath, currentNodes); err != nil {
 					slog.Error("Failed to update log rotation configuration for node changes", "error", err)
@@ -175,26 +158,14 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 			changed, err := credsService.CheckForUpdates()
 			if err != nil {
 				// The refresh failed, so the previous snapshot still stands.
-				// Pushing it below is still worth doing: a node that registered
-				// since the last tick can be fed from what is already known
-				// rather than waiting for the store to come back.
 				slog.Error("Failed to check for credential updates", "error", err)
 			}
 
-			// Hand the refreshed snapshot to the SSH manager on every tick. It
-			// applies only what actually differs, so this costs a map walk and
-			// covers both reasons a node might need feeding: its entry changed,
-			// or it registered after the last tick and has never had one. Only
-			// the SSH manager needs the passwords here — conman picks the new
-			// ones up when runConman rebuilds conman.conf after the SIGTERM below.
-			if sshNodes := filterSSHNodes(nodes.CurrentNodes()); len(sshNodes) > 0 {
-				sshService.UpdateCredentials(credsService.GetPasswords(filterXNames(sshNodes)))
-			}
+			names := filterXNames(nodes.CurrentNodes())
+			sshService.UpdateCredentials(credsService.GetPasswords(names))
 
-			// Restart conman only for a real credential change. A node waiting on
-			// its first Vault entry is no reason to drop every IPMI console.
 			if changed {
-				slog.Info("Credential changes detected, restarting conman")
+				slog.Info("Credential changes detected, signaling conman to restart")
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
@@ -275,13 +246,6 @@ func runConman(ctx context.Context, conmanService ConmanService, credService Cre
 		currentNodes := nodes.CurrentNodes()
 		ipmiNodes := filterIPMINodes(currentNodes)
 
-		// Whatever the snapshot holds right now. A node it does not cover is
-		// configured without credentials rather than waited for: conmand has
-		// already been stopped to get here, so waiting would keep every other
-		// console down for the sake of one, and this loop cannot make the
-		// credentials arrive any sooner — only watchForCredUpdates can. When
-		// they do arrive it reports them as a change, which brings us back
-		// through here.
 		var passwords map[string]compcreds.CompCredentials
 		if len(ipmiNodes) > 0 {
 			passwords = credService.GetPasswords(filterXNames(ipmiNodes))
@@ -421,6 +385,7 @@ func runService(config remoteConsoleConfig) error {
 			// This is a fatal error - don't start with unprotected endpoints
 			slog.Error("Failed to initialize JWT authentication after all retries - refusing to start with unprotected endpoints")
 			serviceStopCtx()
+			sshManager.Shutdown()
 			return fmt.Errorf("failed to fetch JWKS from %s: %w", config.JwksURL, lastErr)
 		}
 	} else {
@@ -454,11 +419,9 @@ func runService(config remoteConsoleConfig) error {
 		sig := <-sigs
 		slog.Info("Detected signal to close service", "signal", sig)
 
-		// Cancel service context to stop background goroutines
-		serviceStopCtx()
-
 		// Shutdown signal with grace period of 30 seconds
 		shutdownCtx, shutdownCtxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCtxCancel()
 
 		go func() {
 			<-shutdownCtx.Done()
@@ -468,6 +431,10 @@ func runService(config remoteConsoleConfig) error {
 				os.Exit(1)
 			}
 		}()
+
+		// Stop background goroutines and wait for SSH console cleanup
+		serviceStopCtx()
+		sshManager.Shutdown()
 
 		// Trigger graceful shutdown
 		err := server.Shutdown(shutdownCtx)

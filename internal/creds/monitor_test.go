@@ -73,11 +73,7 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	require.True(t, changed, "a changed password should report a change")
 }
 
-// GetPasswords answers from the snapshot the check records, and reading it does
-// not disturb the snapshot. That is what keeps subset reads honest: runConman
-// asks about the IPMI nodes and the credential watcher about the SSH ones, and
-// while each of those was a fetch that recorded the baseline, each erased the
-// other's half and every tick afterwards reported a change.
+// GetPasswords serves subsets without changing the stored snapshot.
 func TestGetPasswordsServesTheRecordedSnapshot(t *testing.T) {
 	ipmiNode, sshNode := "x0c0s1b0", "x0c0s2b0"
 	all := []string{ipmiNode, sshNode}
@@ -178,6 +174,66 @@ func TestNewlyProvisionedCredentialIsAChange(t *testing.T) {
 	changed, err = service.checkIfPasswordsChanged(xnames)
 	require.NoError(t, err)
 	require.True(t, changed, "a newly provisioned entry should report a change")
+}
+
+// A short read is not evidence that an entry was deleted rather than merely
+// unavailable. Keep serving the last observation while the node remains in
+// inventory, but let inventory removal discard it.
+func TestMissingCredentialRetainsPreviousEntryUntilNodeLeavesInventory(t *testing.T) {
+	present, missing := "x0c0s1b0", "x0c0s1b1"
+	all := []string{present, missing}
+	service, ss := newTestCredsService(t, map[string]string{
+		present: "password1",
+		missing: "password2",
+	})
+
+	changed, err := service.checkIfPasswordsChanged(all)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.NoError(t, ss.Delete("hms-creds/"+missing))
+
+	changed, err = service.checkIfPasswordsChanged(all)
+	require.NoError(t, err)
+	require.False(t, changed, "an absent read is not a credential change")
+	require.Equal(t, "password2", service.GetPasswords(all)[missing].Password,
+		"the last-known credential should remain available")
+
+	changed, err = service.checkIfPasswordsChanged(all)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Contains(t, service.GetPasswords(all), missing,
+		"subsequent short reads should not poison the snapshot")
+
+	changed, err = service.checkIfPasswordsChanged([]string{present})
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.NotContains(t, service.GetPasswords(all), missing,
+		"a credential should fall away when its node leaves inventory")
+}
+
+// GetCompCreds keys its result by the xname inside each returned value. Some
+// adapters return a zero value for a missing key, producing an entry under "".
+// Rebuilding from inventory must neither retain that artifact nor report it as
+// a first observation.
+func TestFirstObservationIgnoresCredentialOutsideInventory(t *testing.T) {
+	xname := "x0c0s1b0"
+	service, ss := newTestCredsService(t, map[string]string{"x0c0s9b0": "unrelated"})
+	require.NoError(t, ss.Store("hms-creds/"+xname, map[string]string{
+		"Username": "admin",
+		"Password": "password1",
+	}))
+
+	changed, err := service.checkIfPasswordsChanged([]string{xname})
+	require.NoError(t, err)
+	require.False(t, changed, "an entry not keyed by an inventory xname is not news")
+	require.NotNil(t, service.passwords)
+	require.Empty(t, service.passwords)
+
+	storeCred(t, ss, xname, "password1")
+	changed, err = service.checkIfPasswordsChanged([]string{xname})
+	require.NoError(t, err)
+	require.True(t, changed, "a correctly keyed entry arriving later is a change")
 }
 
 // Before inventory arrives there is nothing worth recording. Seeding an empty

@@ -21,8 +21,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/ssh"
 )
 
-// deadAddr returns a host:port that nothing is listening on, so connects to it
-// are refused immediately.
+// deadAddr returns an unused local address so connections fail immediately.
 func deadAddr(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -36,12 +35,9 @@ func deadAddr(t *testing.T) string {
 	return addr
 }
 
-// TestWriteWhileDisconnectedReportsNotConnected pins the Write contract. A
-// managed node that has no live session must say so instead of returning
-// len(p), nil — that claimed the input had been delivered when it had been
-// thrown away, and the interactive session had no way to tell the difference.
-// The error is distinct from the not-found error because a caller should keep
-// going through a reconnect but not through a node that no longer exists.
+// TestWriteWhileDisconnectedReportsNotConnected verifies disconnected writes report no bytes.
+// This prevents discarded input from appearing delivered. ErrNotConnected remains distinct from
+// unmanaged node errors because reconnects are temporary.
 func TestWriteWhileDisconnectedReportsNotConnected(t *testing.T) {
 	id, nodeMap, passwords := singleNode(t, deadAddr(t))
 
@@ -66,8 +62,7 @@ func TestWriteWhileDisconnectedReportsNotConnected(t *testing.T) {
 	}
 }
 
-// waitForBytes reads from a session's recv channel until want appears or the
-// timeout expires.
+// waitForBytes reads until the expected session input arrives or the timeout expires.
 func waitForBytes(t *testing.T, sess *sshSession, want string, timeout time.Duration) {
 	t.Helper()
 	timer := time.NewTimer(timeout)
@@ -86,11 +81,8 @@ func waitForBytes(t *testing.T, sess *sshSession, want string, timeout time.Dura
 	}
 }
 
-// TestUpdateNodesPreservesCredentials pins the split between the two update
-// operations. UpdateNodes decides membership and nothing else; a healthy node
-// that survives the diff must keep running on the credentials it already has.
-// Clearing them would trigger UpdateCreds, drop the connection, and fall
-// through to key auth, which is not what this node uses.
+// TestUpdateNodesPreservesCredentials verifies membership updates retain active credentials.
+// Clearing credentials would drop a healthy session and incorrectly select key authentication.
 func TestUpdateNodesPreservesCredentials(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
@@ -102,10 +94,7 @@ func TestUpdateNodesPreservesCredentials(t *testing.T) {
 
 	startNodes(t, manager, ctx, nodeMap, passwords)
 
-	// Attach before the first connect completes. node.Write silently drops and
-	// reports success while stdin is nil, so writing before the node is fully
-	// wired up would race; the connected marker is broadcast after stdin is
-	// set, which makes it a reliable sync point.
+	// The connected marker confirms stdin is ready before the first write.
 	clientCh, err := manager.Attach(id, "creds-client")
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +109,6 @@ func TestUpdateNodesPreservesCredentials(t *testing.T) {
 	}
 	waitForBytes(t, sess, "before", 15*time.Second)
 
-	// Same node set — the node survives the diff untouched.
 	if err := manager.UpdateNodes(ctx, nodeMap); err != nil {
 		t.Fatal(err)
 	}
@@ -139,10 +127,8 @@ func TestUpdateNodesPreservesCredentials(t *testing.T) {
 	waitForBytes(t, sess, "after", 15*time.Second)
 }
 
-// TestUpdateNodesAddsAndRemovesNodes verifies that UpdateNodes adds and removes
-// nodes on its own, with no credentials in sight. Before the split, a failed
-// credential fetch skipped the SSH update entirely, so a node removed from
-// inventory kept its console running and a newly added node never started.
+// TestUpdateNodesAddsAndRemovesNodes verifies membership changes do not depend on credential
+// delivery. Inventory updates must proceed even when credentials are unavailable.
 func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 	srv := newSSHServer(t, func(ch gossh.Channel) { _ = ch.Close() })
 	id, nodeMap, _ := singleNode(t, srv.addr())
@@ -151,7 +137,7 @@ func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Add. The node must be registered so a later UpdateCredentials can reach it.
+	// Register the node before credentials arrive.
 	if err := manager.UpdateNodes(ctx, nodeMap); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +146,6 @@ func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 	}
 	manager.Detach(id, "probe")
 
-	// Remove.
 	if err := manager.UpdateNodes(ctx, map[string]*nodes.NodeConsoleInfo{}); err != nil {
 		t.Fatal(err)
 	}
@@ -169,13 +154,81 @@ func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 	}
 }
 
-// TestUpdateCredentialsIgnoresAbsentNodes pins the property that lets callers
-// pass a credential map they cannot vouch for. GetPasswords answers from a
-// snapshot that is only as complete as the last refresh, so an absent nodeID
-// says nothing about the node — only that the refresh did not bring it back.
-// UpdateCredentials must therefore leave absent nodes alone:
-// treating absence as a change would tear down a working console every time the
-// credential store had a bad minute.
+// TestShutdownStopsConsoles verifies shutdown removes consoles and prevents later updates from
+// restarting them.
+func TestShutdownStopsConsoles(t *testing.T) {
+	id, nodeMap, _ := singleNode(t, deadAddr(t))
+	manager := ssh.NewSSHConsoleManager(ssh.DefaultSSHConfig(), "", t.TempDir())
+
+	if err := manager.UpdateNodes(context.Background(), nodeMap); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(id, "before-shutdown"); err != nil {
+		t.Fatalf("node was not registered before shutdown: %v", err)
+	}
+	manager.Detach(id, "before-shutdown")
+
+	manager.Shutdown()
+
+	if _, err := manager.Attach(id, "after-shutdown"); err == nil {
+		t.Fatal("node remained registered after shutdown")
+	}
+	if err := manager.UpdateNodes(context.Background(), nodeMap); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(id, "after-update"); err == nil {
+		t.Fatal("node restarted after shutdown")
+	}
+}
+
+// TestUpdateNodesSelectsSSHNodesFromCompleteInventory verifies only SSH nodes are registered.
+// Changing a node away from SSH removes its console.
+func TestUpdateNodesSelectsSSHNodesFromCompleteInventory(t *testing.T) {
+	sshID, ipmiID := "x0c0s1b0", "x0c0s2b0"
+	allNodes := map[string]*nodes.NodeConsoleInfo{
+		sshID: {
+			ID:             sshID,
+			ConnectionType: nodes.SSH,
+			ConnectionHost: "127.0.0.1",
+			ConnectionPort: 1,
+		},
+		ipmiID: {
+			ID:             ipmiID,
+			ConnectionType: nodes.IPMI,
+			ConnectionHost: "127.0.0.1",
+		},
+	}
+
+	manager := newManager(t, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := manager.UpdateNodes(ctx, allNodes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(sshID, "probe"); err != nil {
+		t.Fatalf("SSH node was not registered: %v", err)
+	}
+	manager.Detach(sshID, "probe")
+	if _, err := manager.Attach(ipmiID, "probe"); err == nil {
+		t.Fatal("IPMI node was registered by the SSH manager")
+	}
+
+	allNodes[sshID] = &nodes.NodeConsoleInfo{
+		ID:             sshID,
+		ConnectionType: nodes.IPMI,
+		ConnectionHost: "127.0.0.1",
+	}
+	if err := manager.UpdateNodes(ctx, allNodes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(sshID, "probe"); err == nil {
+		t.Fatal("node remained registered after changing from SSH to IPMI")
+	}
+}
+
+// TestUpdateCredentialsIgnoresAbsentNodes verifies partial snapshots do not disrupt working
+// consoles. A missing entry is not evidence of deletion, so existing credentials remain active.
 func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
@@ -196,7 +249,7 @@ func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {
 	sess := <-sessionCh
 	waitForMarker(t, clientCh, "[Console "+id+" connected at", 15*time.Second)
 
-	// An empty map — every node absent. Nothing may happen to this connection.
+	// An empty update must leave the connection unchanged.
 	manager.UpdateCredentials(map[string]compcredentials.CompCredentials{})
 
 	select {
@@ -212,11 +265,8 @@ func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {
 	waitForBytes(t, sess, "still-here", 15*time.Second)
 }
 
-// waitForLogMarker polls a node's console log file until it contains marker.
-//
-// Markers are broadcast to the log as well as to attached clients, which is
-// what makes this usable where an Attach would race: a node that says something
-// once, before any client could have attached, still leaves it on disk.
+// waitForLogMarker polls a node log until it contains marker. Logs retain markers emitted before
+// clients can attach, which avoids attachment timing races.
 func waitForLogMarker(t *testing.T, logsDir, nodeID, marker string, timeout time.Duration) {
 	t.Helper()
 	path := filepath.Join(logsDir, "console."+nodeID)
@@ -235,16 +285,9 @@ func waitForLogMarker(t *testing.T, logsDir, nodeID, marker string, timeout time
 	t.Fatalf("timeout waiting for %q in %s; log contains: %q", marker, path, string(last))
 }
 
-// TestNodeWithoutCredentialsWaitsInsteadOfDialling covers the provisioning
-// window. Every node in the cluster is expected to have a Vault entry — a
-// password node carries a username and password, a key node a username alone —
-// so an entry that has not arrived means it has not been written yet, not that
-// the node uses key auth.
-//
-// Dialling anyway would send an empty username at a real BMC and burn reconnect
-// attempts reporting an authentication problem, which is a misleading account
-// of a node that is merely early. The node must stay put, say so, and connect
-// once the entry reaches it.
+// TestNodeWithoutCredentialsWaitsInsteadOfDialling verifies provisioning nodes wait for a
+// credential entry. Every node requires a username, even for key authentication, so dialing
+// before the entry arrives would report a misleading authentication failure.
 func TestNodeWithoutCredentialsWaitsInsteadOfDialling(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
@@ -255,15 +298,14 @@ func TestNodeWithoutCredentialsWaitsInsteadOfDialling(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Membership only — no credentials follow.
+	// Register membership without credentials.
 	if err := manager.UpdateNodes(ctx, nodeMap); err != nil {
 		t.Fatal(err)
 	}
 
 	waitForLogMarker(t, logsDir, id, "waiting for credentials", 10*time.Second)
 
-	// Well past several reconnect intervals (250ms min, 1s max in tests), so a
-	// node that was going to dial would have done it by now.
+	// Wait beyond several reconnect intervals to detect an unintended dial.
 	time.Sleep(3 * time.Second)
 
 	if got := srv.accepts.Load(); got != 0 {
@@ -275,8 +317,7 @@ func TestNodeWithoutCredentialsWaitsInsteadOfDialling(t *testing.T) {
 	default:
 	}
 
-	// The entry arrives. The node must pick it up promptly rather than after
-	// some later poll — the wait is on a signal, not a timer.
+	// Credential delivery must wake the node without waiting for a timer.
 	manager.UpdateCredentials(passwords)
 
 	select {
