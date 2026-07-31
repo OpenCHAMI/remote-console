@@ -6,6 +6,7 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -16,6 +17,10 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
+// ErrNotConnected means a managed node is temporarily disconnected. Write discards input and
+// returns this error until reconnect.
+var ErrNotConnected = errors.New("ssh console node not connected")
+
 // SSHConsoleManager manages the set of active SSHConsoleNodes.
 type SSHConsoleManager struct {
 	cfg      SSHConfig
@@ -24,10 +29,10 @@ type SSHConsoleManager struct {
 
 	// nodesMu protects the nodes map.
 	// Lock ordering: nodesMu → clientsMu, nodesMu → connMu
-	nodesMu    sync.RWMutex
-	nodes map[string]*SSHConsoleNode
+	nodesMu sync.RWMutex
+	nodes   map[string]*SSHConsoleNode
 	// cancels maps nodeID to the cancel func for that node's Run goroutine.
-	cancels    map[string]context.CancelFunc
+	cancels map[string]context.CancelFunc
 }
 
 // NewSSHConsoleManager creates a new manager. keyPath is the SSH private key
@@ -35,11 +40,11 @@ type SSHConsoleManager struct {
 // where per-node console log files are written.
 func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleManager {
 	return &SSHConsoleManager{
-		cfg:         cfg,
-		keyPath:     keyPath,
-		logsPath:    logsPath,
-		nodes: make(map[string]*SSHConsoleNode),
-		cancels:     make(map[string]context.CancelFunc),
+		cfg:      cfg,
+		keyPath:  keyPath,
+		logsPath: logsPath,
+		nodes:    make(map[string]*SSHConsoleNode),
+		cancels:  make(map[string]context.CancelFunc),
 	}
 }
 
@@ -175,7 +180,7 @@ func (m *SSHConsoleManager) Detach(nodeID, clientID string) {
 	}
 }
 
-// Write sends data to the SSH session stdin for a node.
+// Write sends data to a node and distinguishes unmanaged nodes from temporary disconnections.
 func (m *SSHConsoleManager) Write(nodeID string, p []byte) (int, error) {
 	m.nodesMu.RLock()
 	node, ok := m.nodes[nodeID]
