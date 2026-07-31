@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,9 +36,14 @@ type ConmanService interface {
 	SignalConmanHUP() error
 }
 
-// CredsService defines the interface for credentials service operations
+// CredsService defines the interface for credentials service operations.
+//
+// CheckForUpdates is what refreshes the service's view of the credential store;
+// GetPasswords serves that view without going near the store. Callers therefore
+// see credentials as of the last refresh, and only watchForCredUpdates calls
+// CheckForUpdates — see the note there for why that has to stay true.
 type CredsService interface {
-	GetPasswordsWithRetries(ctx context.Context, bmcXNames []string, maxTries, waitSecs int) (map[string]compcreds.CompCredentials, error)
+	GetPasswords(xnames []string) map[string]compcreds.CompCredentials
 	EnsureConsoleKeysPresent() (bool, error)
 	CheckForUpdates() (bool, error)
 }
@@ -95,7 +99,8 @@ func filterXNames(sshNodes map[string]*nodes.NodeConsoleInfo) []string {
 // Watch for node updates and signal conman and log rotation as needed.
 //
 // This loop decides membership only. Credentials belong to watchForCredUpdates,
-// which retries delivery for the current SSH nodes on every tick.
+// which pushes the credential snapshot at the SSH manager on every tick and so
+// picks up whatever this loop registered.
 func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpClient *http.Client,
 	conmanService ConmanService, logsService LogsService,
 	sshService SSHConsoleService) {
@@ -143,9 +148,14 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 
 // Watch for credential updates and signal conman and SSH manager as needed.
 //
-// This loop is the sole owner of credential delivery to the SSH manager. It
-// fetches on every tick so a node added after startup receives its entry even
-// when nothing in Vault changed.
+// This loop is the only caller of CheckForUpdates, and that is a constraint
+// rather than a coincidence: CheckForUpdates reports what has changed since the
+// last call, so a second caller would consume changes this one needs to see and
+// conman would never be told to pick them up.
+//
+// It is also the sole owner of credential delivery to the SSH manager. Delivery
+// does not wait for a reported change — a node that registered after the last
+// tick needs its entry even though nothing in the store changed for it.
 func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 	credsService CredsService, conmanService ConmanService, sshService SSHConsoleService) {
 	ticker := time.NewTicker(time.Duration(config.CredsMonitorInterval) * time.Second)
@@ -159,27 +169,12 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 		case <-ticker.C:
 			changed, err := credsService.CheckForUpdates()
 			if err != nil {
+				// The refresh failed, so the previous snapshot still stands.
 				slog.Error("Failed to check for credential updates", "error", err)
 			}
 
-			// Only the SSH manager needs the passwords here. conman picks the
-			// new ones up when runConman rebuilds conman.conf after the SIGTERM
-			// below. A regular tick makes one attempt; a reported Vault change
-			// gets the existing retry budget.
-			sshNodes := filterSSHNodes(nodes.CurrentNodes())
-			if len(sshNodes) > 0 {
-				tries, wait := 1, 0
-				if changed {
-					tries, wait = 3, 5
-				}
-				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(sshNodes), tries, wait)
-				if err != nil {
-					// Whatever came back is still worth applying. Absent node
-					// IDs are left alone, so a partial map only moves nodes
-					// forward onto credentials that arrived.
-					slog.Error("Failed to fetch updated credentials", "error", err)
-				}
-				sshService.UpdateCredentials(passwords)
+			if sshNodes := filterSSHNodes(nodes.CurrentNodes()); len(sshNodes) > 0 {
+				sshService.UpdateCredentials(credsService.GetPasswords(filterXNames(sshNodes)))
 			}
 
 			if changed {
@@ -265,15 +260,8 @@ func runConman(ctx context.Context, conmanService ConmanService, credService Cre
 		ipmiNodes := filterIPMINodes(currentNodes)
 
 		var passwords map[string]compcreds.CompCredentials
-		var err error
 		if len(ipmiNodes) > 0 {
-			passwords, err = credService.GetPasswordsWithRetries(ctx, filterXNames(ipmiNodes), 15, 10)
-			if err != nil {
-				slog.Warn("Credential retrieval ended early", "error", err)
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-			}
+			passwords = credService.GetPasswords(filterXNames(ipmiNodes))
 		}
 
 		hasNodes, err := conmanService.ConfigureConman(ipmiNodes, passwords)
