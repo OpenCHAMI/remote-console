@@ -6,6 +6,7 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -16,6 +17,13 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
+// ErrNotConnected is returned by Write when the node exists but its SSH
+// session is currently down — during the initial connect, or between a drop
+// and the next retry. The input is discarded. It is deliberately distinct from
+// the "node not found" error: not-found is permanent and worth failing on,
+// whereas this clears on its own once the node reconnects.
+var ErrNotConnected = errors.New("ssh console node not connected")
+
 // SSHConsoleManager manages the set of active SSHConsoleNodes.
 type SSHConsoleManager struct {
 	cfg      SSHConfig
@@ -24,10 +32,10 @@ type SSHConsoleManager struct {
 
 	// nodesMu protects the nodes map.
 	// Lock ordering: nodesMu → clientsMu, nodesMu → connMu
-	nodesMu    sync.RWMutex
-	nodes map[string]*SSHConsoleNode
+	nodesMu sync.RWMutex
+	nodes   map[string]*SSHConsoleNode
 	// cancels maps nodeID to the cancel func for that node's Run goroutine.
-	cancels    map[string]context.CancelFunc
+	cancels map[string]context.CancelFunc
 }
 
 // NewSSHConsoleManager creates a new manager. keyPath is the SSH private key
@@ -35,11 +43,11 @@ type SSHConsoleManager struct {
 // where per-node console log files are written.
 func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleManager {
 	return &SSHConsoleManager{
-		cfg:         cfg,
-		keyPath:     keyPath,
-		logsPath:    logsPath,
-		nodes: make(map[string]*SSHConsoleNode),
-		cancels:     make(map[string]context.CancelFunc),
+		cfg:      cfg,
+		keyPath:  keyPath,
+		logsPath: logsPath,
+		nodes:    make(map[string]*SSHConsoleNode),
+		cancels:  make(map[string]context.CancelFunc),
 	}
 }
 
@@ -176,7 +184,9 @@ func (m *SSHConsoleManager) Detach(nodeID, clientID string) {
 	}
 }
 
-// Write sends data to the SSH session stdin for a node.
+// Write sends data to the SSH session stdin for a node. It returns an error if
+// the node is not managed by this manager, and ErrNotConnected if it is managed
+// but currently disconnected.
 func (m *SSHConsoleManager) Write(nodeID string, p []byte) (int, error) {
 	m.nodesMu.RLock()
 	node, ok := m.nodes[nodeID]
