@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,9 +36,14 @@ type ConmanService interface {
 	SignalConmanHUP() error
 }
 
-// CredsService defines the interface for credentials service operations
+// CredsService defines the interface for credentials service operations.
+//
+// CheckForUpdates is what refreshes the service's view of the credential store;
+// GetPasswords serves that view without going near the store. Callers therefore
+// see credentials as of the last refresh, and only watchForCredUpdates calls
+// CheckForUpdates — see the note there for why that has to stay true.
 type CredsService interface {
-	GetPasswordsWithRetries(ctx context.Context, bmcXNames []string, maxTries, waitSecs int) (map[string]compcreds.CompCredentials, error)
+	GetPasswords(xnames []string) map[string]compcreds.CompCredentials
 	EnsureConsoleKeysPresent() (bool, error)
 	CheckForUpdates() (bool, error)
 }
@@ -58,7 +62,6 @@ type LogsService interface {
 type SSHConsoleService interface {
 	UpdateNodes(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo) error
 	UpdateCredentials(passwords map[string]compcreds.CompCredentials)
-	NodesAwaitingCredentials() []string
 	ReopenLogs()
 }
 
@@ -96,8 +99,8 @@ func filterXNames(sshNodes map[string]*nodes.NodeConsoleInfo) []string {
 // Watch for node updates and signal conman and log rotation as needed.
 //
 // This loop decides membership only. Credentials belong to watchForCredUpdates,
-// which picks up any node registered here that is still waiting for its Vault
-// entry — see SSHConsoleService.NodesAwaitingCredentials.
+// which pushes the credential snapshot at the SSH manager on every tick and so
+// picks up whatever this loop registered.
 func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpClient *http.Client,
 	conmanService ConmanService, logsService LogsService,
 	sshService SSHConsoleService) {
@@ -150,11 +153,14 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 
 // Watch for credential updates and signal conman and SSH manager as needed.
 //
-// This loop is the sole owner of credential delivery to the SSH manager. It has
-// two reasons to fetch: Vault changed, or a node registered by
-// watchForNodesUpdates has not received its entry yet. The second is what feeds
-// a node that joined the cluster after startup — nothing in Vault changed for
-// it, so change detection alone would leave it parked forever.
+// This loop is the only caller of CheckForUpdates, and that is a constraint
+// rather than a coincidence: CheckForUpdates reports what has changed since the
+// last call, so a second caller would consume changes this one needs to see and
+// conman would never be told to pick them up.
+//
+// It is also the sole owner of credential delivery to the SSH manager. Delivery
+// does not wait for a reported change — a node that registered after the last
+// tick needs its entry even though nothing in the store changed for it.
 func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 	credsService CredsService, conmanService ConmanService, sshService SSHConsoleService) {
 	ticker := time.NewTicker(time.Duration(config.CredsMonitorInterval) * time.Second)
@@ -168,38 +174,21 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 		case <-ticker.C:
 			changed, err := credsService.CheckForUpdates()
 			if err != nil {
+				// The refresh failed, so the previous snapshot still stands.
+				// Pushing it below is still worth doing: a node that registered
+				// since the last tick can be fed from what is already known
+				// rather than waiting for the store to come back.
 				slog.Error("Failed to check for credential updates", "error", err)
 			}
 
-			awaiting := sshService.NodesAwaitingCredentials()
-			if len(awaiting) > 0 {
-				slog.Info("SSH console nodes awaiting credentials", "count", len(awaiting))
-			}
-
-			if changed || len(awaiting) > 0 {
-				// Only the SSH manager needs the passwords here. conman picks
-				// the new ones up when runConman rebuilds conman.conf after the
-				// SIGTERM below.
-				sshNodes := filterSSHNodes(nodes.CurrentNodes())
-				if len(sshNodes) > 0 {
-					// Retry inside the call only when Vault reported a change,
-					// which means the entries are there to be read. When merely
-					// chasing nodes that are waiting, this ticker is the retry —
-					// an entry that has not been provisioned yet would otherwise
-					// burn the retry budget on every tick to learn the same thing.
-					tries, wait := 1, 0
-					if changed {
-						tries, wait = 3, 5
-					}
-					passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(sshNodes), tries, wait)
-					if err != nil {
-						// Whatever came back is still worth applying: absent node
-						// IDs are left alone, so a partial map can only move nodes
-						// forward onto credentials that did arrive.
-						slog.Error("Failed to fetch updated credentials", "error", err)
-					}
-					sshService.UpdateCredentials(passwords)
-				}
+			// Hand the refreshed snapshot to the SSH manager on every tick. It
+			// applies only what actually differs, so this costs a map walk and
+			// covers both reasons a node might need feeding: its entry changed,
+			// or it registered after the last tick and has never had one. Only
+			// the SSH manager needs the passwords here — conman picks the new
+			// ones up when runConman rebuilds conman.conf after the SIGTERM below.
+			if sshNodes := filterSSHNodes(nodes.CurrentNodes()); len(sshNodes) > 0 {
+				sshService.UpdateCredentials(credsService.GetPasswords(filterXNames(sshNodes)))
 			}
 
 			// Restart conman only for a real credential change. A node waiting on
@@ -286,16 +275,16 @@ func runConman(ctx context.Context, conmanService ConmanService, credService Cre
 		currentNodes := nodes.CurrentNodes()
 		ipmiNodes := filterIPMINodes(currentNodes)
 
+		// Whatever the snapshot holds right now. A node it does not cover is
+		// configured without credentials rather than waited for: conmand has
+		// already been stopped to get here, so waiting would keep every other
+		// console down for the sake of one, and this loop cannot make the
+		// credentials arrive any sooner — only watchForCredUpdates can. When
+		// they do arrive it reports them as a change, which brings us back
+		// through here.
 		var passwords map[string]compcreds.CompCredentials
-		var err error
 		if len(ipmiNodes) > 0 {
-			passwords, err = credService.GetPasswordsWithRetries(ctx, filterXNames(ipmiNodes), 15, 10)
-			if err != nil {
-				slog.Warn("Credential retrieval ended early", "error", err)
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-			}
+			passwords = credService.GetPasswords(filterXNames(ipmiNodes))
 		}
 
 		hasNodes, err := conmanService.ConfigureConman(ipmiNodes, passwords)

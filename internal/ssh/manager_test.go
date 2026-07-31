@@ -170,10 +170,10 @@ func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 }
 
 // TestUpdateCredentialsIgnoresAbsentNodes pins the property that lets callers
-// pass a credential map they cannot vouch for. GetPasswordsWithRetries returns
-// whatever it managed to fetch with a nil error once it exhausts its retries,
-// so an absent nodeID says nothing about the node — only that this fetch did
-// not bring it back. UpdateCredentials must therefore leave absent nodes alone:
+// pass a credential map they cannot vouch for. GetPasswords answers from a
+// snapshot that is only as complete as the last refresh, so an absent nodeID
+// says nothing about the node — only that the refresh did not bring it back.
+// UpdateCredentials must therefore leave absent nodes alone:
 // treating absence as a change would tear down a working console every time the
 // credential store had a bad minute.
 func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {
@@ -283,44 +283,5 @@ func TestNodeWithoutCredentialsWaitsInsteadOfDialling(t *testing.T) {
 	case <-sessionCh:
 	case <-time.After(15 * time.Second):
 		t.Fatal("node did not connect after its credentials arrived")
-	}
-}
-
-// TestNodesAwaitingCredentials covers the signal the credential watcher runs
-// on. A node added after startup needs its Vault entry fetched even though
-// nothing in Vault changed, so change detection alone would leave it parked;
-// the watcher asks the manager who is still waiting instead.
-func TestNodesAwaitingCredentials(t *testing.T) {
-	id, nodeMap, passwords := singleNode(t, deadAddr(t))
-
-	manager := newManager(t, t.TempDir())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if got := manager.NodesAwaitingCredentials(); len(got) != 0 {
-		t.Fatalf("NodesAwaitingCredentials on an empty manager = %v, want none", got)
-	}
-
-	if err := manager.UpdateNodes(ctx, nodeMap); err != nil {
-		t.Fatal(err)
-	}
-	got := manager.NodesAwaitingCredentials()
-	if len(got) != 1 || got[0] != id {
-		t.Fatalf("NodesAwaitingCredentials after adding %s = %v, want [%s]", id, got, id)
-	}
-
-	// UpdateCredentials applies synchronously, so the node has stopped waiting
-	// by the time it returns — no polling window here.
-	manager.UpdateCredentials(passwords)
-	if got := manager.NodesAwaitingCredentials(); len(got) != 0 {
-		t.Fatalf("NodesAwaitingCredentials after delivery = %v, want none", got)
-	}
-
-	// A node dropped from inventory is not waiting for anything.
-	if err := manager.UpdateNodes(ctx, map[string]*nodes.NodeConsoleInfo{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := manager.NodesAwaitingCredentials(); len(got) != 0 {
-		t.Fatalf("NodesAwaitingCredentials after removing the node = %v, want none", got)
 	}
 }

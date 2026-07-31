@@ -91,8 +91,7 @@ func credsChanged(a, b compcredentials.CompCredentials) bool {
 // succeed — or to have happened at all.
 //
 // A node discovered here starts with no credentials. It registers and accepts
-// Attach, but does not connect until UpdateCredentials brings it a Vault entry;
-// see NodesAwaitingCredentials.
+// Attach, but does not connect until UpdateCredentials brings it a Vault entry.
 func (m *SSHConsoleManager) UpdateNodes(
 	ctx context.Context,
 	sshNodes map[string]*nodes.NodeConsoleInfo,
@@ -185,25 +184,6 @@ func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentia
 	for _, u := range updates {
 		u.console.UpdateCreds(u.creds)
 	}
-}
-
-// NodesAwaitingCredentials returns the IDs of managed nodes that have not yet
-// received a Vault entry. Those nodes are registered but parked — they will not
-// connect until UpdateCredentials reaches them.
-//
-// The credential watcher uses this to decide it has work to do. Watching Vault
-// for changes is not enough on its own: a node added after startup needs its
-// entry fetched even though nothing in Vault changed.
-func (m *SSHConsoleManager) NodesAwaitingCredentials() []string {
-	m.consolesMu.RLock()
-	defer m.consolesMu.RUnlock()
-	var waiting []string
-	for nodeID, console := range m.consoles {
-		if console.currentCreds() == nil {
-			waiting = append(waiting, nodeID)
-		}
-	}
-	return waiting
 }
 
 // ReopenLogs signals all active consoles to reopen their log files after rotation.
