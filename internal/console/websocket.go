@@ -18,6 +18,8 @@ const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
 	pingPeriod = 30 * time.Second
+	// This allows large terminal pastes without accepting unbounded input.
+	maxWebSocketMessageSize = 64 * 1024
 )
 
 type webSockMessage struct {
@@ -40,12 +42,16 @@ type webSocketSession struct {
 	ctx         context.Context // cancelled when the session is closed
 	cancel      context.CancelFunc
 	closeMutex  sync.Mutex
+	closeSet    bool // guards against a later close overwriting the first reason
 	closeCode   int
 	closeReason string
 }
 
 func newWebSocketSession(conn *websocket.Conn, name string) *webSocketSession {
 	ctx, cancel := context.WithCancel(context.Background())
+	if conn != nil {
+		conn.SetReadLimit(maxWebSocketMessageSize)
+	}
 	return &webSocketSession{
 		conn:   conn,
 		send:   make(chan webSockMessage, 64),
@@ -88,11 +94,19 @@ func (ws *webSocketSession) Write(messageType int, data []byte) error {
 	}
 }
 
+// close records why the session is ending and unblocks writePump, which sends
+// the close frame.
+//
+// The first reason wins. A specific error may close the session before deferred
+// cleanup closes it again. Letting the last caller win would relabel the error
+// as a normal closure.
 func (ws *webSocketSession) close(reason sessionCloseReason, message string) {
 	ws.closeMutex.Lock()
-	code := mapCloseReason(reason)
-	ws.closeCode = code
-	ws.closeReason = message
+	if !ws.closeSet {
+		ws.closeSet = true
+		ws.closeCode = mapCloseReason(reason)
+		ws.closeReason = message
+	}
 	ws.closeMutex.Unlock()
 	ws.cancel()
 }
