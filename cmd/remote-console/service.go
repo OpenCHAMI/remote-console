@@ -51,12 +51,14 @@ type LogsService interface {
 	AggregateFiles(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo)
 }
 
-// SSHConsoleService defines the management interface for the SSH console manager.
-// Interactive access (Attach/Detach/Write) flows through the console.SSHManager
-// interface, which is passed directly to console.SetupRoutes.
+// SSHConsoleService defines the management interface for the SSH console
+// manager. Interactive access (Attach/Detach/Write) does not go through here —
+// the concrete *ssh.SSHConsoleManager is passed to console.SetupRoutes, which
+// uses it directly.
 type SSHConsoleService interface {
-	UpdateNodes(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo,
+	UpdateNodesAndCredentials(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo,
 		passwords map[string]compcreds.CompCredentials) error
+	UpdateNodes(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo) error
 	UpdateCredentials(passwords map[string]compcreds.CompCredentials)
 	ReopenLogs()
 }
@@ -116,14 +118,33 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 				currentNodes := nodes.CurrentNodes()
 				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(currentNodes), 15, 10)
 				if err != nil {
-					slog.Error("Failed to fetch credentials for updated nodes", "error", err)
+					// passwords holds whatever the final attempt returned: possibly
+					// nil, possibly a partial map. An absent entry is then
+					// indistinguishable from a node that legitimately has no password
+					// and uses key auth, so neither consumer can read this map as the
+					// full picture.
+					//
+					// Skip the conman reconfigure — it interpolates credentials
+					// straight into conman.conf, and rewriting that from a partial map
+					// before SignalConmanTERM would drop working IPMI consoles. Apply
+					// the SSH node changes without credentials, so removed nodes
+					// still stop and added nodes still start while every existing
+					// node keeps the credentials it already has.
+					//
+					// This only catches the failed fetch. A fetch that exhausts its
+					// retries and returns a partial map with a nil error takes the
+					// branch below and reconfigures from incomplete credentials.
+					slog.Error("Failed to fetch credentials for updated nodes; skipping conman reconfigure, applying SSH node changes without credentials", "error", err)
+					if err := sshService.UpdateNodes(ctx, filterSSHNodes(currentNodes)); err != nil {
+						slog.Error("Failed to update SSH console nodes", "error", err)
+					}
 				} else {
 					// Regenerate conman config with the new node list and credentials.
 					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords); err != nil {
 						slog.Error("Failed to reconfigure conman", "error", err)
 					}
-					// Update SSH nodes with current topology and credentials.
-					if err := sshService.UpdateNodes(ctx, filterSSHNodes(currentNodes), passwords); err != nil {
+					// Update SSH nodes with the current node set and credentials.
+					if err := sshService.UpdateNodesAndCredentials(ctx, filterSSHNodes(currentNodes), passwords); err != nil {
 						slog.Error("Failed to update SSH console manager", "error", err)
 					}
 				}
@@ -170,6 +191,11 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 				currentNodes := nodes.CurrentNodes()
 				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(currentNodes), 3, 5)
 				if err != nil {
+					// Same partial-map ambiguity as the node watch loop, but here
+					// skipping outright is the whole answer: no node joined or left,
+					// so there is no node change to apply and every node keeps
+					// running on the credentials it already has until a later fetch
+					// succeeds.
 					slog.Error("Failed to fetch updated credentials", "error", err)
 				} else {
 					// Regenerate conman config so IPMI nodes pick up the new credentials.
@@ -370,9 +396,16 @@ func runService(config remoteConsoleConfig) error {
 	initialSSHNodes := filterSSHNodes(nodes.CurrentNodes())
 	if len(initialSSHNodes) > 0 {
 		initialXNames := filterXNames(initialSSHNodes)
-		if passwords, err := credsService.GetPasswordsWithRetries(serviceCtx, initialXNames, 15, 10); err != nil {
-			slog.Warn("Failed to fetch initial SSH credentials", "error", err)
-		} else if err := sshManager.UpdateNodes(serviceCtx, initialSSHNodes, passwords); err != nil {
+		passwords, err := credsService.GetPasswordsWithRetries(serviceCtx, initialXNames, 15, 10)
+		if err != nil {
+			// Start the nodes anyway. watchForNodesUpdates only reconfigures when
+			// inventory actually changes, so bailing out here would leave every
+			// SSH console dead until something in SMD happened to change.
+			slog.Warn("Failed to fetch initial SSH credentials, starting nodes without them", "error", err)
+			if err := sshManager.UpdateNodes(serviceCtx, initialSSHNodes); err != nil {
+				slog.Error("Failed initial SSH node update", "error", err)
+			}
+		} else if err := sshManager.UpdateNodesAndCredentials(serviceCtx, initialSSHNodes, passwords); err != nil {
 			slog.Error("Failed initial SSH manager node update", "error", err)
 		}
 	}

@@ -261,7 +261,9 @@ func newManager(t *testing.T, logsDir string) *ssh.SSHConsoleManager {
 	cfg.TCPKeepAlive = 0
 	cfg.ReconnectMinInterval = 250 * time.Millisecond
 	cfg.ReconnectMaxInterval = 1 * time.Second
-	return ssh.NewSSHConsoleManager(cfg, "", logsDir)
+	manager := ssh.NewSSHConsoleManager(cfg, "", logsDir)
+	t.Cleanup(manager.Wait)
+	return manager
 }
 
 // waitForMarker reads from ch until the accumulated output contains marker or

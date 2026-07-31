@@ -34,7 +34,7 @@ func TestSSHConsoleNodeReconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +75,7 @@ func TestSSHConsoleNodeFanOut(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,7 +145,7 @@ func TestSSHConsoleNodeDataFlow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
 		t.Fatal(err)
 	}
 
@@ -185,11 +185,12 @@ func TestSSHConsoleNodeDataFlow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Node lifecycle via UpdateNodes
+// 4. Node lifecycle via UpdateNodesAndCredentials
 // ---------------------------------------------------------------------------
 
-// TestSSHConsoleNodeLifecycle verifies that removing a node via UpdateNodes
-// cancels its Run goroutine and that all associated goroutines exit cleanly.
+// TestSSHConsoleNodeLifecycle verifies that removing a node via
+// UpdateNodesAndCredentials cancels its Run goroutine and that all associated
+// goroutines exit cleanly.
 func TestSSHConsoleNodeLifecycle(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
@@ -201,7 +202,7 @@ func TestSSHConsoleNodeLifecycle(t *testing.T) {
 
 	goroutinesBefore := runtime.NumGoroutine()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
 		t.Fatal(err)
 	}
 
@@ -210,8 +211,8 @@ func TestSSHConsoleNodeLifecycle(t *testing.T) {
 	t.Logf("goroutines with node: %d (added %d)", runtime.NumGoroutine(), runtime.NumGoroutine()-goroutinesBefore)
 
 	// Remove the node. The manager is the sole authority on node lifetime, so
-	// cancelling through UpdateNodes must be enough to stop Run.
-	if err := manager.UpdateNodes(ctx, map[string]*nodes.NodeConsoleInfo{}, map[string]compcredentials.CompCredentials{}); err != nil {
+	// cancelling through UpdateNodesAndCredentials must be enough to stop Run.
+	if err := manager.UpdateNodesAndCredentials(ctx, map[string]*nodes.NodeConsoleInfo{}, map[string]compcredentials.CompCredentials{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -254,7 +255,7 @@ func TestSlowClientGetsDropNotice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
 		t.Fatal(err)
 	}
 

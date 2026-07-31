@@ -79,8 +79,8 @@ func TestSSHConsoleManagerScale(t *testing.T) {
 
 	goroutinesBefore := runtime.NumGoroutine()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatalf("UpdateNodes: %v", err)
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
+		t.Fatalf("UpdateNodesAndCredentials: %v", err)
 	}
 
 	// Wait until all nodes have established a shell session on the server.

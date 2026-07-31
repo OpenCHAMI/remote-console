@@ -34,7 +34,7 @@ import (
 //	                (stresses connMu)
 //	credsWorker   – UpdateCredentials in a tight loop (stresses credsMu + connMu)
 //	rotateWorker  – ReopenLogs repeatedly (stresses reopenLogCh vs broadcast)
-//	updateWorker  – UpdateNodes with a shifting node set (stresses nodesMu vs
+//	updateWorker  – UpdateNodesAndCredentials with a shifting node set (stresses nodesMu vs
 //	                everything else)
 const (
 	concurrentNodes    = 100
@@ -82,8 +82,8 @@ func TestSSHConsoleManagerConcurrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-		t.Fatalf("initial UpdateNodes: %v", err)
+	if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
+		t.Fatalf("initial UpdateNodesAndCredentials: %v", err)
 	}
 
 	// Wait until all nodes are registered (Attach succeeds) before starting workers.
@@ -213,14 +213,14 @@ func TestSSHConsoleManagerConcurrent(t *testing.T) {
 				}
 			}
 			subMap := makeNodeMap(subset)
-			if err := manager.UpdateNodes(ctx, subMap, makePasswords(subset)); err != nil {
-				t.Errorf("UpdateNodes (subset): %v", err)
+			if err := manager.UpdateNodesAndCredentials(ctx, subMap, makePasswords(subset)); err != nil {
+				t.Errorf("UpdateNodesAndCredentials (subset): %v", err)
 			}
 			time.Sleep(20 * time.Millisecond)
 
 			// Restore the full set.
-			if err := manager.UpdateNodes(ctx, nodeMap, passwords); err != nil {
-				t.Errorf("UpdateNodes (full): %v", err)
+			if err := manager.UpdateNodesAndCredentials(ctx, nodeMap, passwords); err != nil {
+				t.Errorf("UpdateNodesAndCredentials (full): %v", err)
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
