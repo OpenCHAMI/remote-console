@@ -135,8 +135,8 @@ func (c *SSHConsole) connectAndStream(ctx context.Context) bool {
 	c.streamStdout(stdout)
 
 	// Clean up the connection. Nil stdin under connMu so Write sees nil and
-	// drops silently, then close it under stdinMu so an in-flight Write cannot
-	// race with Close on the underlying SSH channel buffer.
+	// reports ErrNotConnected, then close it under stdinMu so an in-flight Write
+	// cannot race with Close on the underlying SSH channel buffer.
 	c.connMu.Lock()
 	if c.sshClient != nil {
 		_ = c.sshClient.Close()
@@ -558,8 +558,10 @@ func (c *SSHConsole) Detach(clientID string) {
 	}
 }
 
-// Write sends data to the SSH session's stdin. Returns len(p), nil silently
-// when disconnected so callers do not treat transient disconnects as fatal.
+// Write sends data to the SSH session's stdin. It reports ErrNotConnected
+// rather than claiming a successful write when the node is between
+// connections, so callers can decide what to do with the discarded input; a
+// transient disconnect is not a reason to tear the caller down.
 func (c *SSHConsole) Write(p []byte) (int, error) {
 	c.stdinMu.Lock()
 	defer c.stdinMu.Unlock()
@@ -569,7 +571,7 @@ func (c *SSHConsole) Write(p []byte) (int, error) {
 	c.connMu.Unlock()
 
 	if stdin == nil {
-		return len(p), nil // silent drop during reconnect
+		return 0, ErrNotConnected
 	}
 	return stdin.Write(p)
 }
