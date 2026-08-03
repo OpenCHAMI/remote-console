@@ -8,7 +8,20 @@ on:
 permissions: write-all # Necessary for the generate-build-provenance action with containers
 
 jobs:
+  unit_tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/unit_test.yaml
+
+  integration_tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/integration_test.yaml
+
   build:
+    needs:
+      - unit_tests
+      - integration_tests
     runs-on: ubuntu-latest
     steps:
       - name: Install cross-compilation tools
