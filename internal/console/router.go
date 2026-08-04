@@ -15,6 +15,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/websocket"
 	openchami_authenticator "github.com/openchami/chi-middleware/auth"
+
+	"github.com/OpenCHAMI/remote-console/internal/ssh"
 )
 
 const routePrefix = "/remote-console"
@@ -29,7 +31,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // doConsole dispatches to either interactive or tail mode based on the mode query parameter
-func doConsole(consoleLogsPath string, sessions *interactiveSessions, w http.ResponseWriter, r *http.Request) {
+func doConsole(consoleLogsPath string, sessions *interactiveSessions, sshMgr *ssh.SSHConsoleManager, w http.ResponseWriter, r *http.Request) {
 	// Parse mode parameter (defaults to "interactive")
 	params := r.URL.Query()
 	mode := params.Get("mode")
@@ -41,13 +43,13 @@ func doConsole(consoleLogsPath string, sessions *interactiveSessions, w http.Res
 	case "tail":
 		doTailConsole(consoleLogsPath, w, r)
 	case "interactive":
-		doInteractiveConsole(sessions, w, r)
+		doInteractiveConsole(sessions, w, r, sshMgr)
 	default:
 		http.Error(w, fmt.Sprintf("Invalid mode parameter: %s (must be 'interactive' or 'tail')", mode), http.StatusBadRequest)
 	}
 }
 
-func SetupRoutes(consoleLogsPath string) *chi.Mux {
+func SetupRoutes(consoleLogsPath string, sshMgr *ssh.SSHConsoleManager) *chi.Mux {
 	router := chi.NewRouter()
 	interactiveSessions := newInteractiveSessions()
 
@@ -74,7 +76,7 @@ func SetupRoutes(consoleLogsPath string) *chi.Mux {
 
 			r.Get("/consoles", doConsoles)
 			r.Get("/consoles/{nodeID}", func(w http.ResponseWriter, r *http.Request) {
-				doConsole(consoleLogsPath, interactiveSessions, w, r)
+				doConsole(consoleLogsPath, interactiveSessions, sshMgr, w, r)
 			})
 		})
 	})
