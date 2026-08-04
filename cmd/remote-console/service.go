@@ -22,6 +22,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/ssh"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
@@ -50,10 +51,53 @@ type LogsService interface {
 	AggregateFiles(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo)
 }
 
+// SSHConsoleService defines the management interface for the SSH console manager.
+// Interactive access (Attach/Detach/Write) flows through the console.SSHManager
+// interface, which is passed directly to console.SetupRoutes.
+type SSHConsoleService interface {
+	UpdateNodes(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo,
+		passwords map[string]compcreds.CompCredentials) error
+	UpdateCredentials(passwords map[string]compcreds.CompCredentials)
+	ReopenLogs()
+}
+
+// filterSSHNodes returns the subset of nodes with SSH connection type.
+func filterSSHNodes(allNodes map[string]*nodes.NodeConsoleInfo) map[string]*nodes.NodeConsoleInfo {
+	result := make(map[string]*nodes.NodeConsoleInfo)
+	for id, n := range allNodes {
+		if n.IsSSH() {
+			result[id] = n
+		}
+	}
+	return result
+}
+
+// filterIPMINodes returns the subset of nodes with IPMI connection type.
+func filterIPMINodes(allNodes map[string]*nodes.NodeConsoleInfo) map[string]*nodes.NodeConsoleInfo {
+	result := make(map[string]*nodes.NodeConsoleInfo)
+	for id, n := range allNodes {
+		if n.ConnectionType == nodes.IPMI {
+			result[id] = n
+		}
+	}
+	return result
+}
+
+// filterXNames returns the xnames from a node map.
+func filterXNames(sshNodes map[string]*nodes.NodeConsoleInfo) []string {
+	xnames := make([]string, 0, len(sshNodes))
+	for id := range sshNodes {
+		xnames = append(xnames, id)
+	}
+	return xnames
+}
+
 // Watch for node updates and signal conman and log rotation as needed
-func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpClient *http.Client, conmanService ConmanService, logsService LogsService) {
-	// conman will add the conman directory, so we point the logs service their
-	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
+func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpClient *http.Client,
+	conmanService ConmanService, logsService LogsService,
+	credsService CredsService, sshService SSHConsoleService) {
+	// ConMan writes console files in a conman subdirectory.
+	consoleLogsPath := filepath.Join(config.Log.ConsoleLogsBasePath, "conman")
 
 	ticker := time.NewTicker(time.Duration(config.NewNodeLookup) * time.Second)
 	defer ticker.Stop()
@@ -67,29 +111,45 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 			changed := nodes.CheckForUpdates(ctx, httpClient, config.SmdURL)
 
 			if changed {
-				slog.Info("Node changes detected, signaling conman to restart")
+				slog.Info("Node changes detected, reconfiguring services")
+
+				currentNodes := nodes.CurrentNodes()
+				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(currentNodes), 15, 10)
+				if err != nil {
+					slog.Error("Failed to fetch credentials for updated nodes", "error", err)
+				} else {
+					// Regenerate conman config with the new node list and credentials.
+					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords, config.Creds.SshConsoleKeyPath); err != nil {
+						slog.Error("Failed to reconfigure conman", "error", err)
+					}
+					// Update SSH nodes with current topology and credentials.
+					if err := sshService.UpdateNodes(ctx, filterSSHNodes(currentNodes), passwords); err != nil {
+						slog.Error("Failed to update SSH console manager", "error", err)
+					}
+				}
+
+				// Restart conman to pick up the new config.
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
 
-				nodes := nodes.CurrentNodes()
-
 				// also update log rotation configuration
 				slog.Info("Updating log rotation configuration for node changes")
-				if err := logsService.UpdateLogRotateConf(conmanLogsPath, nodes); err != nil {
+				if err := logsService.UpdateLogRotateConf(consoleLogsPath, currentNodes); err != nil {
 					slog.Error("Failed to update log rotation configuration for node changes", "error", err)
 				}
 
 				// make sure we are aggregating any new console log files
 				slog.Info("Updating log aggregation configuration for node changes")
-				logsService.AggregateFiles(conmanLogsPath, nodes)
+				logsService.AggregateFiles(consoleLogsPath, currentNodes)
 			}
 		}
 	}
 }
 
-// Watch for credential updates and signal conman as needed
-func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig, credsService CredsService, conmanService ConmanService) {
+// Watch for credential updates and signal conman and SSH manager as needed
+func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
+	credsService CredsService, conmanService ConmanService, sshService SSHConsoleService) {
 	ticker := time.NewTicker(time.Duration(config.CredsMonitorInterval) * time.Second)
 	defer ticker.Stop()
 
@@ -105,7 +165,22 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig, credsS
 			}
 
 			if changed {
-				slog.Info("Credential changes detected, signaling conman to restart")
+				slog.Info("Credential changes detected, reconfiguring services")
+
+				currentNodes := nodes.CurrentNodes()
+				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(currentNodes), 3, 5)
+				if err != nil {
+					slog.Error("Failed to fetch updated credentials", "error", err)
+				} else {
+					// Regenerate conman config so IPMI nodes pick up the new credentials.
+					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords, config.Creds.SshConsoleKeyPath); err != nil {
+						slog.Error("Failed to reconfigure conman with updated credentials", "error", err)
+					}
+					// Push updated credentials to SSH nodes.
+					sshService.UpdateCredentials(passwords)
+				}
+
+				// Always restart conman regardless of config update outcome.
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
@@ -115,7 +190,7 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig, credsS
 }
 
 // Log rotation setup and loop
-func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
+func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService ConmanService, logsService LogsService, sshService SSHConsoleService) {
 	logConfig := config.Log
 	// log the log rotation parameters
 	slog.Info("Log rotation configuration",
@@ -126,11 +201,11 @@ func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService Co
 		"aggFileSize", logConfig.AggLogsFileSize,
 		"aggNumRotate", logConfig.AggLogsNumRotate)
 
-	// conman will add the conman directory, so we point the logs service their
-	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
+	// ConMan writes console files in a conman subdirectory.
+	consoleLogsPath := filepath.Join(config.Log.ConsoleLogsBasePath, "conman")
 
 	// Create the log rotation configuration file
-	if err := logsService.UpdateLogRotateConf(conmanLogsPath, nodes.CurrentNodes()); err != nil {
+	if err := logsService.UpdateLogRotateConf(consoleLogsPath, nodes.CurrentNodes()); err != nil {
 		slog.Error("Failed to update log rotation configuration", "error", err)
 	}
 
@@ -151,12 +226,13 @@ func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService Co
 			slog.Info("Exiting log rotation loop due to shutdown")
 			return
 		case <-ticker.C:
-			restartConman := logsService.LogRotate(conmanLogsPath)
-			if restartConman {
-				slog.Info("Log files rotated, signaling conmand")
+			consoleLogsRotated := logsService.LogRotate(consoleLogsPath)
+			if consoleLogsRotated {
+				slog.Info("Log files rotated, signalling conmand and SSH manager")
 				if err := conmanService.SignalConmanHUP(); err != nil {
 					slog.Error("Failed to signal conman with SIGHUP", "error", err)
 				}
+				sshService.ReopenLogs()
 			}
 		}
 	}
@@ -183,21 +259,21 @@ func runConman(ctx context.Context, config remoteConsoleConfig, conmanService Co
 		}
 
 		currentNodes := nodes.CurrentNodes()
+		ipmiNodes := filterIPMINodes(currentNodes)
 
-		var requireCredentials []string
-		for _, nci := range currentNodes {
-			requireCredentials = append(requireCredentials, nci.ID)
-		}
-
-		passwords, err := credService.GetPasswordsWithRetries(ctx, requireCredentials, 15, 10)
-		if err != nil {
-			slog.Warn("Credential retrieval ended early", "error", err)
-			if errors.Is(err, context.Canceled) {
-				return
+		var passwords map[string]compcreds.CompCredentials
+		var err error
+		if len(ipmiNodes) > 0 {
+			passwords, err = credService.GetPasswordsWithRetries(ctx, filterXNames(ipmiNodes), 15, 10)
+			if err != nil {
+				slog.Warn("Credential retrieval ended early", "error", err)
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 			}
 		}
 
-		hasNodes, err := conmanService.ConfigureConman(currentNodes, passwords, config.Creds.SshConsoleKeyPath)
+		hasNodes, err := conmanService.ConfigureConman(ipmiNodes, passwords, config.Creds.SshConsoleKeyPath)
 		if err != nil {
 			slog.Error("Failed to configure conman", "error", err)
 			if waitWithContext(5 * time.Second) {
@@ -232,11 +308,10 @@ func runService(config remoteConsoleConfig) error {
 
 	conmanService := conman.NewConmanService(config.Conman)
 
-	// Conman will append "conman" to this path for its logs, so we
-	// need to pass that full path to service monitoring the logs
-	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
-	if err := os.MkdirAll(conmanLogsPath, 0755); err != nil {
-		slog.Error("Failed to create console logs directory", "path", conmanLogsPath, "error", err)
+	// ConMan writes console files in a conman subdirectory.
+	consoleLogsPath := filepath.Join(config.Log.ConsoleLogsBasePath, "conman")
+	if err := os.MkdirAll(consoleLogsPath, 0755); err != nil {
+		slog.Error("Failed to create console logs directory", "path", consoleLogsPath, "error", err)
 		return err
 	}
 
@@ -288,17 +363,31 @@ func runService(config remoteConsoleConfig) error {
 		}
 	}
 
+	// Create the SSH console manager.
+	sshManager := ssh.NewSSHConsoleManager(config.SSH, config.Creds.SshConsoleKeyPath, consoleLogsPath)
+
+	// Seed SSH nodes immediately — watchForNodesUpdates only fires after the first tick.
+	initialSSHNodes := filterSSHNodes(nodes.CurrentNodes())
+	if len(initialSSHNodes) > 0 {
+		initialXNames := filterXNames(initialSSHNodes)
+		if passwords, err := credsService.GetPasswordsWithRetries(serviceCtx, initialXNames, 15, 10); err != nil {
+			slog.Warn("Failed to fetch initial SSH credentials", "error", err)
+		} else if err := sshManager.UpdateNodes(serviceCtx, initialSSHNodes, passwords); err != nil {
+			slog.Error("Failed initial SSH manager node update", "error", err)
+		}
+	}
+
 	// goroutine for log rotation
-	go logRotate(serviceCtx, config, conmanService, logsService)
+	go logRotate(serviceCtx, config, conmanService, logsService, sshManager)
 
 	// goroutine to watches for changes in console configuration
-	go watchForNodesUpdates(serviceCtx, config, smdHTTPClient, conmanService, logsService)
+	go watchForNodesUpdates(serviceCtx, config, smdHTTPClient, conmanService, logsService, credsService, sshManager)
 
 	// goroutine to run conman
 	go runConman(serviceCtx, config, conmanService, credsService)
 
 	// goroutine watch for credential updates
-	go watchForCredUpdates(serviceCtx, config, credsService, conmanService)
+	go watchForCredUpdates(serviceCtx, config, credsService, conmanService, sshManager)
 
 	// Initialize JWT token authorization if JWKS URL is provided
 	if config.JwksURL != "" {
@@ -342,7 +431,7 @@ func runService(config remoteConsoleConfig) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
-	router := console.SetupRoutes(conmanLogsPath)
+	router := console.SetupRoutes(consoleLogsPath, sshManager)
 
 	slog.Info("Starting HTTP server", "address", config.HttpListen)
 	server := &http.Server{Addr: config.HttpListen, Handler: router}
