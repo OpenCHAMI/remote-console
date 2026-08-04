@@ -5,6 +5,7 @@
 package logs
 
 type LogConfig struct {
+	ConsoleLogsBasePath     string `desc:"Base path for console log files."`
 	ConsoleLogsFileSize     string `desc:"Maximum size of console log files before rotation."`
 	ConsoleLogsNumRotate    int    `desc:"Number of rotated console log files to keep."`
 	ConsoleLogsBackupPath   string `desc:"Path to rotated console log files."`
@@ -19,6 +20,7 @@ type LogConfig struct {
 
 func DefaultLogConfig() LogConfig {
 	return LogConfig{
+		ConsoleLogsBasePath:     "/var/log/conman",
 		LogRotateEnabled:        true,
 		ConsoleLogsFileSize:     "5M",
 		ConsoleLogsNumRotate:    2,

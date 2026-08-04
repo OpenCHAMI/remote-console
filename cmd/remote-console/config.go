@@ -6,11 +6,13 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
+	"github.com/OpenCHAMI/remote-console/internal/ssh"
 )
 
 type OAuth2Config struct {
@@ -24,6 +26,7 @@ type remoteConsoleConfig struct {
 	Log                  logs.LogConfig `flag:"-"`
 	Conman               conman.ConmanConfig
 	Creds                creds.CredsConfig
+	SSH                  ssh.SSHConfig
 	HttpListen           string `desc:"HTTP listen address"`
 	NewNodeLookup        int    `desc:"Interval in seconds to look for new nodes"`
 	CredsMonitorInterval int    `desc:"Interval in seconds to monitor credential updates"`
@@ -38,6 +41,7 @@ func DefaultConfig() remoteConsoleConfig {
 		Log:                  logs.DefaultLogConfig(),
 		Conman:               conman.DefaultConmanConfig(),
 		Creds:                creds.DefaultCredsConfig(),
+		SSH:                  ssh.DefaultSSHConfig(),
 		HttpListen:           "0.0.0.0:26776",
 		NewNodeLookup:        120,
 		CredsMonitorInterval: 30,
@@ -72,9 +76,38 @@ func validateCredsConfig(config *remoteConsoleConfig) error {
 	return nil
 }
 
+func resolveConsoleLogsBasePath(config *remoteConsoleConfig) error {
+	newPath := config.Log.ConsoleLogsBasePath
+	legacyPath := config.Conman.LogsPath
+	defaultPath := logs.DefaultLogConfig().ConsoleLogsBasePath
+
+	switch {
+	case newPath == legacyPath:
+		return nil
+	case legacyPath == defaultPath:
+		config.Conman.LogsPath = newPath
+		return nil
+	case newPath == defaultPath:
+		slog.Warn("conman-logs-path is deprecated, use console-logs-base-path")
+		config.Log.ConsoleLogsBasePath = legacyPath
+		return nil
+	default:
+		return fmt.Errorf("console-logs-base-path %q conflicts with deprecated conman-logs-path %q",
+			newPath, legacyPath)
+	}
+}
+
 func validateConfig(config *remoteConsoleConfig) error {
+	if err := resolveConsoleLogsBasePath(config); err != nil {
+		return err
+	}
+
 	if err := validateCredsConfig(config); err != nil {
 		return err
+	}
+
+	if err := config.SSH.Validate(); err != nil {
+		return fmt.Errorf("invalid SSH console configuration: %w", err)
 	}
 
 	// Validate OAuth2 configuration - either all or nothing
