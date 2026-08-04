@@ -42,15 +42,19 @@ func (cs *CredsService) CheckForUpdates() (bool, error) {
 }
 
 func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
-	if cs.previousPasswords == nil {
-		return false, nil
-	}
 	currentPasswords, err := getPasswords(cs.config, xnames)
 
 	if err != nil {
 		slog.Error("Error retrieving passwords while checking for credential changes", "error", err)
 		return false, err
 	}
+
+	if cs.previousPasswords == nil {
+		cs.previousPasswords = currentPasswords
+		return false, nil
+	}
+
+	changed := false
 	for _, xname := range xnames {
 		currentCreds, ok := currentPasswords[xname]
 		if !ok {
@@ -61,11 +65,16 @@ func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
 			slog.Info("Change detected in the passwords. Conman will be reconfigured.")
-			return true, nil
+			changed = true
+			break
 		}
 	}
 
-	return false, nil
+	// Only the full inventory refresh owns this snapshot. Credential reads for
+	// a subset of nodes must not make every omitted node appear changed later.
+	cs.previousPasswords = currentPasswords
+
+	return changed, nil
 }
 
 func (cs *CredsService) checkIfKeysChanged() (bool, error) {

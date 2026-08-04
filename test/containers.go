@@ -508,7 +508,7 @@ func startRemoteConsoleWithEnv(ctx context.Context, envOverrides map[string]stri
 			"RCS_CREDS_MONITOR_INTERVAL":             "10",
 			"RCS_CREDS_SECURE_STORAGE_SSH_KEYS_PATH": "hms-creds/bmc-console-keys",
 			"RCS_CONMAN_PID_FILE_PATH":               "/app/remote-console.pid",
-			"RCS_CONMAN_LOGS_PATH":                   "/tmp",
+			"RCS_CONSOLE_LOGS_BASE_PATH":             "/tmp",
 			// Log rotation settings for testing
 			"RCS_LOG_ROTATE_CHECK_FREQUENCY": "5",  // Check every 5 seconds
 			"RCS_CONSOLE_LOGS_FILE_SIZE":     "5M", // Small size to trigger rotation easily
