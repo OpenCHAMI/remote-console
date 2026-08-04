@@ -178,6 +178,125 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 	}
 }
 
+func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
+	// Use existing console from SetupSuite
+	console := consoleFixtures["ssh-password"]
+	existingNodeID := console.nodeID
+	promptTimeout := 90 * time.Second
+
+	// Connect to interactive console
+	wsConn, resp, err := s.connectInteractiveConsole(existingNodeID, console.prompt, promptTimeout)
+	s.Require().NoError(err)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.T().Logf("Warning: failed to close response body: %v", err)
+		}
+		if err := wsConn.Close(); err != nil {
+			s.T().Logf("Warning: failed to close websocket: %v", err)
+		}
+	}()
+
+	// Run hostname command and validate console is working before triggering reconnection
+	s.T().Log("Running initial hostname command to verify console is working")
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command")
+
+	expectedHostLine := existingNodeID + "\r\n"
+	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output from console")
+	s.Require().Contains(hostnameOutput, expectedHostLine, "Expected hostname in output")
+	s.Require().NotContains(hostnameOutput, "[Reconnecting", "Console should not be reconnecting initially")
+	s.Require().NotContains(hostnameOutput, "Connection refused", "Console should be connected without errors")
+	s.T().Logf("Initial hostname output: %s", hostnameOutput)
+
+	// Give the console a moment to stabilize
+	time.Sleep(2 * time.Second)
+
+	// Stop the SSH container to trigger a disconnection
+	s.T().Log("Stopping SSH container to trigger disconnection")
+	stopTimeout := 10 * time.Second
+	s.Require().NoError(s.containers["ssh-password"].Stop(context.Background(), &stopTimeout))
+
+	// Verify disconnect message appears
+	disconnectMsg := fmt.Sprintf("[Console %s disconnected at", existingNodeID)
+	output, err := s.readWebSocketUntil(wsConn, disconnectMsg, 2*time.Minute)
+	s.Require().NoError(err, "Expected disconnect message")
+	s.Require().Contains(output, disconnectMsg, "Expected disconnect message in output")
+	s.T().Logf("Saw disconnect message: %s", output)
+
+	// Restart the SSH container so the node can reconnect
+	s.T().Log("Starting SSH container to allow reconnection")
+	s.Require().NoError(s.containers["ssh-password"].Start(context.Background()))
+
+	// Wait for reconnection banner
+	connectedMsg := fmt.Sprintf("[Console %s connected at", existingNodeID)
+	output, err = s.readWebSocketUntil(wsConn, connectedMsg, 2*time.Minute)
+	s.Require().NoError(err, "Expected connected message after reconnection")
+	s.Require().Contains(output, connectedMsg, "Expected connected message in output")
+	s.T().Logf("Saw connected message: %s", output)
+
+	// Wait for console prompt to appear after reconnection
+	s.T().Log("Waiting for console prompt after reconnection")
+	_, err = s.waitForConsolePrompt(wsConn, ":~$ ", promptTimeout)
+	s.Require().NoError(err, "Expected console prompt after reconnection")
+	s.T().Log("Console prompt received after reconnection")
+
+	// Rerun hostname command to verify reconnection worked
+	s.T().Log("Running hostname command after reconnection")
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command after reconnect")
+
+	hostnameOutput2, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output after reconnection")
+	s.Require().Contains(hostnameOutput2, expectedHostLine, "Expected hostname in output after reconnection")
+	s.T().Logf("Hostname output after reconnection: %s", hostnameOutput2)
+
+	s.T().Log("Reconnection test completed successfully")
+}
+
+func (s *IntegrationTestSuite) TestConsoleInteractiveConmanReconnect() {
+	console := consoleFixtures["ipmi"]
+	nodeID := console.nodeID
+	promptTimeout := 90 * time.Second
+
+	wsConn, resp, err := s.connectInteractiveConsole(nodeID, console.prompt, promptTimeout)
+	s.Require().NoError(err)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.T().Logf("Warning: failed to close response body: %v", err)
+		}
+		if err := wsConn.Close(); err != nil {
+			s.T().Logf("Warning: failed to close websocket: %v", err)
+		}
+	}()
+
+	s.Require().NoError(wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r")))
+	expectedHostLine := nodeID + "\r\n"
+	output, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output before reconnect")
+	s.Require().Contains(output, expectedHostLine)
+
+	remoteConsole, ok := s.containers["remote-console"]
+	s.Require().True(ok, "remote-console container should exist")
+
+	exitCode, _, err := remoteConsole.Exec(context.Background(), []string{"pkill", "-TERM", "-x", "conman"})
+	s.Require().NoError(err, "Failed to stop conman client")
+	s.Require().Equal(0, exitCode, "No conman client was stopped")
+
+	reconnectMsg := fmt.Sprintf("[Reconnecting to %s...]", nodeID)
+	output, err = s.readWebSocketUntil(wsConn, reconnectMsg, promptTimeout)
+	s.Require().NoError(err, "Expected ConMan reconnect message")
+	s.Require().Contains(output, reconnectMsg)
+
+	_, err = s.waitForConsolePrompt(wsConn, console.prompt, promptTimeout)
+	s.Require().NoError(err, "Expected console prompt after reconnect")
+
+	s.Require().NoError(wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r")))
+	output, err = s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output after reconnect")
+	s.Require().Contains(output, expectedHostLine)
+}
+
 func (s *IntegrationTestSuite) TestConsoleInteractiveNewNodeNoDisrupt() {
 	// Verify that adding a new SSH node does not disrupt an existing interactive session.
 	// Previously (conman era) adding a node caused conmand to restart, which briefly
