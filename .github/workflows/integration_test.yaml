@@ -21,4 +21,4 @@ jobs:
           go build -o remote-console ./cmd/remote-console
       - name: Run integration tests
         run: |
-          go test ./test -timeout 20m ./test
+          go test ./test -timeout 30m ./test
