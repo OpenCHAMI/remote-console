@@ -154,6 +154,79 @@ func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 	}
 }
 
+// TestShutdownStopsConsoles verifies shutdown removes consoles and prevents later updates from
+// restarting them.
+func TestShutdownStopsConsoles(t *testing.T) {
+	id, nodeMap, _ := singleNode(t, deadAddr(t))
+	manager := ssh.NewSSHConsoleManager(ssh.DefaultSSHConfig(), "", t.TempDir())
+
+	if err := manager.UpdateNodes(context.Background(), nodeMap); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(id, "before-shutdown"); err != nil {
+		t.Fatalf("node was not registered before shutdown: %v", err)
+	}
+	manager.Detach(id, "before-shutdown")
+
+	manager.Shutdown()
+
+	if _, err := manager.Attach(id, "after-shutdown"); err == nil {
+		t.Fatal("node remained registered after shutdown")
+	}
+	if err := manager.UpdateNodes(context.Background(), nodeMap); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(id, "after-update"); err == nil {
+		t.Fatal("node restarted after shutdown")
+	}
+}
+
+// TestUpdateNodesSelectsSSHNodesFromCompleteInventory verifies only SSH nodes are registered.
+// Changing a node away from SSH removes its console.
+func TestUpdateNodesSelectsSSHNodesFromCompleteInventory(t *testing.T) {
+	sshID, ipmiID := "x0c0s1b0", "x0c0s2b0"
+	allNodes := map[string]*nodes.NodeConsoleInfo{
+		sshID: {
+			ID:             sshID,
+			ConnectionType: nodes.SSH,
+			ConnectionHost: "127.0.0.1",
+			ConnectionPort: 1,
+		},
+		ipmiID: {
+			ID:             ipmiID,
+			ConnectionType: nodes.IPMI,
+			ConnectionHost: "127.0.0.1",
+		},
+	}
+
+	manager := newManager(t, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := manager.UpdateNodes(ctx, allNodes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(sshID, "probe"); err != nil {
+		t.Fatalf("SSH node was not registered: %v", err)
+	}
+	manager.Detach(sshID, "probe")
+	if _, err := manager.Attach(ipmiID, "probe"); err == nil {
+		t.Fatal("IPMI node was registered by the SSH manager")
+	}
+
+	allNodes[sshID] = &nodes.NodeConsoleInfo{
+		ID:             sshID,
+		ConnectionType: nodes.IPMI,
+		ConnectionHost: "127.0.0.1",
+	}
+	if err := manager.UpdateNodes(ctx, allNodes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(sshID, "probe"); err == nil {
+		t.Fatal("node remained registered after changing from SSH to IPMI")
+	}
+}
+
 // TestUpdateCredentialsIgnoresAbsentNodes verifies partial snapshots do not disrupt working
 // consoles. A missing entry is not evidence of deletion, so existing credentials remain active.
 func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {

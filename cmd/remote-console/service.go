@@ -60,20 +60,9 @@ type LogsService interface {
 // the concrete *ssh.SSHConsoleManager is passed to console.SetupRoutes, which
 // uses it directly.
 type SSHConsoleService interface {
-	UpdateNodes(ctx context.Context, sshNodes map[string]*nodes.NodeConsoleInfo) error
+	UpdateNodes(ctx context.Context, nodes map[string]*nodes.NodeConsoleInfo) error
 	UpdateCredentials(passwords map[string]compcreds.CompCredentials)
 	ReopenLogs()
-}
-
-// filterSSHNodes returns the subset of nodes with SSH connection type.
-func filterSSHNodes(allNodes map[string]*nodes.NodeConsoleInfo) map[string]*nodes.NodeConsoleInfo {
-	result := make(map[string]*nodes.NodeConsoleInfo)
-	for id, n := range allNodes {
-		if n.IsSSH() {
-			result[id] = n
-		}
-	}
-	return result
 }
 
 // filterIPMINodes returns the subset of nodes with IPMI connection type.
@@ -88,9 +77,9 @@ func filterIPMINodes(allNodes map[string]*nodes.NodeConsoleInfo) map[string]*nod
 }
 
 // filterXNames returns the xnames from a node map.
-func filterXNames(sshNodes map[string]*nodes.NodeConsoleInfo) []string {
-	xnames := make([]string, 0, len(sshNodes))
-	for id := range sshNodes {
+func filterXNames(nodes map[string]*nodes.NodeConsoleInfo) []string {
+	xnames := make([]string, 0, len(nodes))
+	for id := range nodes {
 		xnames = append(xnames, id)
 	}
 	return xnames
@@ -123,8 +112,7 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 
 				currentNodes := nodes.CurrentNodes()
 
-				sshNodes := filterSSHNodes(currentNodes)
-				if err := sshService.UpdateNodes(ctx, sshNodes); err != nil {
+				if err := sshService.UpdateNodes(ctx, currentNodes); err != nil {
 					slog.Error("Failed to update SSH console nodes", "error", err)
 				}
 
@@ -173,12 +161,11 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 				slog.Error("Failed to check for credential updates", "error", err)
 			}
 
-			if sshNodes := filterSSHNodes(nodes.CurrentNodes()); len(sshNodes) > 0 {
-				sshService.UpdateCredentials(credsService.GetPasswords(filterXNames(sshNodes)))
-			}
+			names := filterXNames(nodes.CurrentNodes())
+			sshService.UpdateCredentials(credsService.GetPasswords(names))
 
 			if changed {
-				slog.Info("Credential changes detected, restarting conman")
+				slog.Info("Credential changes detected, signaling conman to restart")
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
@@ -398,6 +385,7 @@ func runService(config remoteConsoleConfig) error {
 			// This is a fatal error - don't start with unprotected endpoints
 			slog.Error("Failed to initialize JWT authentication after all retries - refusing to start with unprotected endpoints")
 			serviceStopCtx()
+			sshManager.Shutdown()
 			return fmt.Errorf("failed to fetch JWKS from %s: %w", config.JwksURL, lastErr)
 		}
 	} else {
@@ -431,11 +419,9 @@ func runService(config remoteConsoleConfig) error {
 		sig := <-sigs
 		slog.Info("Detected signal to close service", "signal", sig)
 
-		// Cancel service context to stop background goroutines
-		serviceStopCtx()
-
 		// Shutdown signal with grace period of 30 seconds
 		shutdownCtx, shutdownCtxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCtxCancel()
 
 		go func() {
 			<-shutdownCtx.Done()
@@ -445,6 +431,10 @@ func runService(config remoteConsoleConfig) error {
 				os.Exit(1)
 			}
 		}()
+
+		// Stop background goroutines and wait for SSH console cleanup
+		serviceStopCtx()
+		sshManager.Shutdown()
 
 		// Trigger graceful shutdown
 		err := server.Shutdown(shutdownCtx)
