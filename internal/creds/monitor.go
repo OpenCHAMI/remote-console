@@ -41,17 +41,27 @@ func (cs *CredsService) CheckForUpdates() (bool, error) {
 	return (len(ids) > 0 && passwordsChanged) || keysChanged, nil
 }
 
+// checkIfPasswordsChanged refreshes the credential snapshot and reports changes.
 func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
-	currentPasswords, err := getPasswords(cs.config, xnames)
+	if len(xnames) == 0 {
+		// Preserve the snapshot until inventory is available.
+		return false, nil
+	}
 
+	currentPasswords, err := getPasswords(cs.config, xnames)
 	if err != nil {
+		// A failed read does not invalidate the previous snapshot.
 		slog.Error("Error retrieving passwords while checking for credential changes", "error", err)
 		return false, err
 	}
 
-	if cs.previousPasswords == nil {
-		cs.previousPasswords = currentPasswords
-		return false, nil
+	cs.passwordsMu.Lock()
+	defer cs.passwordsMu.Unlock()
+
+	if cs.passwords == nil {
+		// Report a non-empty first read so ConMan receives initial credentials.
+		cs.passwords = currentPasswords
+		return len(currentPasswords) > 0, nil
 	}
 
 	changed := false
@@ -61,7 +71,13 @@ func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 			slog.Warn("Missing credentials detected while checking for credential changes", "xname", xname)
 			continue
 		}
-		previousCreds := cs.previousPasswords[xname]
+
+		previousCreds, seen := cs.passwords[xname]
+		if !seen {
+			slog.Info("New credentials detected. Conman will be reconfigured.", "xname", xname)
+			changed = true
+			break
+		}
 
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
 			slog.Info("Change detected in the passwords. Conman will be reconfigured.")
@@ -70,9 +86,8 @@ func (cs *CredsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 		}
 	}
 
-	// Only the full inventory refresh owns this snapshot. Credential reads for
-	// a subset of nodes must not make every omitted node appear changed later.
-	cs.previousPasswords = currentPasswords
+	// Replace rather than merge, so entries for departed nodes fall away.
+	cs.passwords = currentPasswords
 
 	return changed, nil
 }

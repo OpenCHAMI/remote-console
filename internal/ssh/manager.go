@@ -30,7 +30,7 @@ type SSHConsoleManager struct {
 	// consolesMu protects consoles.
 	consolesMu sync.RWMutex
 	consoles   map[string]*SSHConsole
-	cancels    map[string]context.CancelFunc
+	cancels map[string]context.CancelFunc
 
 	// running tracks Run goroutines through final cleanup.
 	running sync.WaitGroup
@@ -128,19 +128,10 @@ func (m *SSHConsoleManager) Wait() {
 	m.running.Wait()
 }
 
-// UpdateCredentials delivers Vault entries to managed nodes, reconnecting any
-// node whose entry differs from the one it is using. It is the only way
-// credentials enter the manager; UpdateNodes never touches them.
-//
-// Only node IDs present in passwords are considered. An absent node is left
-// alone rather than cleared: a credential that has not arrived is not evidence
-// that a node has none, and a fetch can come back short for reasons that have
-// nothing to do with the node. A caller may therefore pass whatever it managed
-// to fetch without first deciding whether the result is complete.
-//
-// Moving a node from password to key auth is done by clearing the password on
-// its Vault entry, not by deleting the entry — the username is still needed
-// either way. That arrives here as a changed entry and is applied normally.
+// UpdateCredentials reconnects managed nodes whose credentials changed. UpdateNodes handles
+// membership and never changes authentication. Missing entries leave existing credentials
+// unchanged because reads may be partial, and entries for unmanaged nodes are ignored. An empty
+// password selects key authentication.
 func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentials.CompCredentials) {
 	m.consolesMu.RLock()
 	type pending struct {
