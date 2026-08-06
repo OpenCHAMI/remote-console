@@ -17,29 +17,27 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
-// ErrNotConnected means a managed console is temporarily disconnected. Write discards input and
+// ErrNotConnected means a managed node is temporarily disconnected. Write discards input and
 // returns this error until reconnect.
-var ErrNotConnected = errors.New("ssh console console not connected")
+var ErrNotConnected = errors.New("ssh console node not connected")
 
-// SSHConsoleManager manages the set of active SSHConsoleNodes.
+// SSHConsoleManager manages one console for each SSH node.
 type SSHConsoleManager struct {
 	cfg      SSHConfig
 	keyPath  string
 	logsPath string // e.g. /var/log/conman/conman
 
-	// consolesMu protects the nodes map.
-	// Lock ordering: consolesMu → clientsMu, consolesMu → connMu
+	// consolesMu protects consoles.
 	consolesMu sync.RWMutex
 	consoles   map[string]*SSHConsole
-	// cancels maps nodeID to the cancel func for that console's Run goroutine.
-	cancels map[string]context.CancelFunc
+	cancels    map[string]context.CancelFunc
 
 	// running tracks Run goroutines through final cleanup.
 	running sync.WaitGroup
 }
 
 // NewSSHConsoleManager creates a manager from validated configuration. keyPath may be empty when
-// all nodes use password authentication. logsPath stores per-console console logs.
+// all nodes use password authentication. logsPath stores per-node console logs.
 func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleManager {
 	return &SSHConsoleManager{
 		cfg:      cfg,
@@ -50,12 +48,12 @@ func NewSSHConsoleManager(cfg SSHConfig, keyPath, logsPath string) *SSHConsoleMa
 	}
 }
 
-// logPath returns the log file path for a console.
+// logPath returns the log file path for a node.
 func (m *SSHConsoleManager) logPath(nodeID string) string {
 	return filepath.Join(m.logsPath, "console."+nodeID)
 }
 
-// nodeChanged reports whether a console's connection parameters have changed.
+// nodeChanged reports whether a node's connection parameters have changed.
 func nodeChanged(existing *nodes.NodeConsoleInfo, updated *nodes.NodeConsoleInfo) bool {
 	return existing.ConnectionHost != updated.ConnectionHost ||
 		existing.ConnectionPort != updated.ConnectionPort ||
@@ -67,10 +65,10 @@ func credsChanged(a, b compcredentials.CompCredentials) bool {
 	return a.Username != b.Username || a.Password != b.Password
 }
 
-// UpdateNodes syncs managed consoles with the provided SSH console set. It starts new nodes, stops
-// removed nodes, and restarts consoles when connection settings change. Existing nodes retain
-// their credentials. ctx controls console lifetime. New nodes use key authentication until
-// UpdateCredentials supplies a password.
+// UpdateNodes syncs managed consoles with the provided SSH node set. It starts new SSH nodes and
+// stops removed nodes. Connection changes restart a console with its existing
+// credentials, while new nodes wait for UpdateCredentials before connecting. ctx controls
+// console lifetime.
 func (m *SSHConsoleManager) UpdateNodes(
 	ctx context.Context,
 	sshNodes map[string]*nodes.NodeConsoleInfo,
@@ -78,10 +76,10 @@ func (m *SSHConsoleManager) UpdateNodes(
 	m.consolesMu.Lock()
 	defer m.consolesMu.Unlock()
 
-	// Stop nodes that are no longer in the updated set.
+	// Stop the consoles of nodes that are no longer in the updated set.
 	for nodeID, cancel := range m.cancels {
 		if _, stillActive := sshNodes[nodeID]; !stillActive {
-			slog.Info("Stopping SSH console console", "nodeID", nodeID)
+			slog.Info("Stopping SSH console", "nodeID", nodeID)
 			cancel()
 			delete(m.consoles, nodeID)
 			delete(m.cancels, nodeID)
@@ -91,14 +89,15 @@ func (m *SSHConsoleManager) UpdateNodes(
 	for nodeID, info := range sshNodes {
 		existing, exists := m.consoles[nodeID]
 		if !exists {
-			m.startConsole(ctx, nodeID, info, compcredentials.CompCredentials{})
+			// nil credentials: the console parks until UpdateCredentials reaches it.
+			m.startConsole(ctx, nodeID, info, nil)
 			continue
 		}
 
 		if nodeChanged(existing.info, info) {
-			// Connection parameters changed — restart with the credentials the
-			// console is already using.
-			slog.Info("SSH console console parameters changed, restarting", "nodeID", nodeID)
+			// Connection parameters changed — replace the console, carrying the
+			// credentials the old one was using.
+			slog.Info("SSH console node parameters changed, restarting", "nodeID", nodeID)
 			creds := existing.currentCreds()
 			m.cancels[nodeID]()
 			m.startConsole(ctx, nodeID, info, creds)
@@ -108,18 +107,18 @@ func (m *SSHConsoleManager) UpdateNodes(
 	return nil
 }
 
-// startConsole creates and starts a new SSHConsole. Must be called with consolesMu held.
-func (m *SSHConsoleManager) startConsole(ctx context.Context, nodeID string, info *nodes.NodeConsoleInfo, creds compcredentials.CompCredentials) {
-	nodeCtx, nodeCancel := context.WithCancel(ctx)
-	console := newSSHConsole(nodeID, info, creds, m.keyPath, m.logPath(nodeID), m.cfg)
-	console.cancel = nodeCancel
+// startConsole creates and starts one console. Call with consolesMu held. Nil credentials delay
+// connection.
+func (m *SSHConsoleManager) startConsole(ctx context.Context, nodeID string, info *nodes.NodeConsoleInfo, creds *compcredentials.CompCredentials) {
+	consoleCtx, consoleCancel := context.WithCancel(ctx)
+	console := newSSHConsole(nodeID, info, creds, m.keyPath, m.logPath(nodeID), m.cfg, consoleCancel)
 	m.consoles[nodeID] = console
-	m.cancels[nodeID] = nodeCancel
-	slog.Info("Starting SSH console console", "nodeID", nodeID, "host", info.ConnectionHost)
+	m.cancels[nodeID] = consoleCancel
+	slog.Info("Starting SSH console", "nodeID", nodeID, "host", info.ConnectionHost)
 	m.running.Add(1)
 	go func() {
 		defer m.running.Done()
-		console.Run(nodeCtx)
+		console.Run(consoleCtx)
 	}()
 }
 
@@ -129,8 +128,19 @@ func (m *SSHConsoleManager) Wait() {
 	m.running.Wait()
 }
 
-// UpdateCredentials updates credentials for managed nodes present in passwords.
-// Nodes absent from passwords retain their current credentials.
+// UpdateCredentials delivers Vault entries to managed nodes, reconnecting any
+// node whose entry differs from the one it is using. It is the only way
+// credentials enter the manager; UpdateNodes never touches them.
+//
+// Only node IDs present in passwords are considered. An absent node is left
+// alone rather than cleared: a credential that has not arrived is not evidence
+// that a node has none, and a fetch can come back short for reasons that have
+// nothing to do with the node. A caller may therefore pass whatever it managed
+// to fetch without first deciding whether the result is complete.
+//
+// Moving a node from password to key auth is done by clearing the password on
+// its Vault entry, not by deleting the entry — the username is still needed
+// either way. That arrives here as a changed entry and is applied normally.
 func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentials.CompCredentials) {
 	m.consolesMu.RLock()
 	type pending struct {
@@ -140,7 +150,8 @@ func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentia
 	var updates []pending
 	for nodeID, console := range m.consoles {
 		if creds, ok := passwords[nodeID]; ok {
-			if credsChanged(console.currentCreds(), creds) {
+			// A node still waiting for its first entry always counts as changed.
+			if current := console.currentCreds(); current == nil || credsChanged(*current, creds) {
 				updates = append(updates, pending{console, creds})
 			}
 		}
@@ -152,7 +163,7 @@ func (m *SSHConsoleManager) UpdateCredentials(passwords map[string]compcredentia
 	}
 }
 
-// ReopenLogs signals all active nodes to reopen their log files after rotation.
+// ReopenLogs signals all active consoles to reopen their log files after rotation.
 func (m *SSHConsoleManager) ReopenLogs() {
 	m.consolesMu.RLock()
 	defer m.consolesMu.RUnlock()
@@ -161,13 +172,13 @@ func (m *SSHConsoleManager) ReopenLogs() {
 	}
 }
 
-// Attach connects a client and fails if the console is unmanaged.
+// Attach connects a client and fails if the node is unmanaged.
 func (m *SSHConsoleManager) Attach(nodeID, clientID string) (chan []byte, error) {
 	m.consolesMu.RLock()
 	console, ok := m.consoles[nodeID]
 	m.consolesMu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("SSH console console %q not found", nodeID)
+		return nil, fmt.Errorf("SSH console node %q not found", nodeID)
 	}
 	return console.Attach(clientID), nil
 }
@@ -182,13 +193,13 @@ func (m *SSHConsoleManager) Detach(nodeID, clientID string) {
 	}
 }
 
-// Write sends data to a console and distinguishes unmanaged nodes from temporary disconnections.
+// Write sends data to a node and distinguishes unmanaged nodes from temporary disconnections.
 func (m *SSHConsoleManager) Write(nodeID string, p []byte) (int, error) {
 	m.consolesMu.RLock()
 	console, ok := m.consoles[nodeID]
 	m.consolesMu.RUnlock()
 	if !ok {
-		return 0, fmt.Errorf("SSH console console %q not found", nodeID)
+		return 0, fmt.Errorf("SSH console node %q not found", nodeID)
 	}
 	return console.Write(p)
 }

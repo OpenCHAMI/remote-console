@@ -92,10 +92,13 @@ func filterXNames(sshNodes map[string]*nodes.NodeConsoleInfo) []string {
 	return xnames
 }
 
-// Watch for node updates and signal conman and log rotation as needed
+// Watch for node updates and signal conman and log rotation as needed.
+//
+// This loop decides membership only. Credentials belong to watchForCredUpdates,
+// which retries delivery for the current SSH nodes on every tick.
 func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpClient *http.Client,
 	conmanService ConmanService, logsService LogsService,
-	credsService CredsService, sshService SSHConsoleService) {
+	sshService SSHConsoleService) {
 	// ConMan writes console files in a conman subdirectory.
 	consoleLogsPath := filepath.Join(config.Log.ConsoleLogsBasePath, "conman")
 
@@ -114,42 +117,12 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 				slog.Info("Node changes detected, reconfiguring services")
 
 				currentNodes := nodes.CurrentNodes()
-				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(currentNodes), 15, 10)
-				if err != nil {
-					// passwords holds whatever the final attempt returned: possibly
-					// nil, possibly a partial map. An absent entry is then
-					// indistinguishable from a node that legitimately has no password
-					// and uses key auth, so neither consumer can read this map as the
-					// full picture.
-					//
-					// Skip the conman reconfigure — it interpolates credentials
-					// straight into conman.conf, and rewriting that from a partial map
-					// before SignalConmanTERM would drop working IPMI consoles. Apply
-					// the SSH node changes without credentials, so removed nodes
-					// still stop and added nodes still start while every existing
-					// node keeps the credentials it already has.
-					//
-					// This only catches the failed fetch. A fetch that exhausts its
-					// retries and returns a partial map with a nil error takes the
-					// branch below and reconfigures from incomplete credentials.
-					slog.Error("Failed to fetch credentials for updated nodes; skipping conman reconfigure, applying SSH node changes without credentials", "error", err)
-					if err := sshService.UpdateNodes(ctx, filterSSHNodes(currentNodes)); err != nil {
-						slog.Error("Failed to update SSH console nodes", "error", err)
-					}
-				} else {
-					// Regenerate conman config with the new node list and credentials.
-					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords); err != nil {
-						slog.Error("Failed to reconfigure conman", "error", err)
-					}
-					// Update SSH membership before delivering the credentials that
-					// were fetched for the current node set.
-					if err := sshService.UpdateNodes(ctx, filterSSHNodes(currentNodes)); err != nil {
-						slog.Error("Failed to update SSH console manager", "error", err)
-					}
-					sshService.UpdateCredentials(passwords)
+
+				sshNodes := filterSSHNodes(currentNodes)
+				if err := sshService.UpdateNodes(ctx, sshNodes); err != nil {
+					slog.Error("Failed to update SSH console nodes", "error", err)
 				}
 
-				// Restart conman to pick up the new config.
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
@@ -168,7 +141,11 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 	}
 }
 
-// Watch for credential updates and signal conman and SSH manager as needed
+// Watch for credential updates and signal conman and SSH manager as needed.
+//
+// This loop is the sole owner of credential delivery to the SSH manager. It
+// fetches on every tick so a node added after startup receives its entry even
+// when nothing in Vault changed.
 func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 	credsService CredsService, conmanService ConmanService, sshService SSHConsoleService) {
 	ticker := time.NewTicker(time.Duration(config.CredsMonitorInterval) * time.Second)
@@ -185,28 +162,28 @@ func watchForCredUpdates(ctx context.Context, config remoteConsoleConfig,
 				slog.Error("Failed to check for credential updates", "error", err)
 			}
 
-			if changed {
-				slog.Info("Credential changes detected, reconfiguring services")
-
-				currentNodes := nodes.CurrentNodes()
-				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(currentNodes), 3, 5)
-				if err != nil {
-					// Same partial-map ambiguity as the node watch loop, but here
-					// skipping outright is the whole answer: no node joined or left,
-					// so there is no node change to apply and every node keeps
-					// running on the credentials it already has until a later fetch
-					// succeeds.
-					slog.Error("Failed to fetch updated credentials", "error", err)
-				} else {
-					// Regenerate conman config so IPMI nodes pick up the new credentials.
-					if _, err := conmanService.ConfigureConman(filterIPMINodes(currentNodes), passwords); err != nil {
-						slog.Error("Failed to reconfigure conman with updated credentials", "error", err)
-					}
-					// Push updated credentials to SSH nodes.
-					sshService.UpdateCredentials(passwords)
+			// Only the SSH manager needs the passwords here. conman picks the
+			// new ones up when runConman rebuilds conman.conf after the SIGTERM
+			// below. A regular tick makes one attempt; a reported Vault change
+			// gets the existing retry budget.
+			sshNodes := filterSSHNodes(nodes.CurrentNodes())
+			if len(sshNodes) > 0 {
+				tries, wait := 1, 0
+				if changed {
+					tries, wait = 3, 5
 				}
+				passwords, err := credsService.GetPasswordsWithRetries(ctx, filterXNames(sshNodes), tries, wait)
+				if err != nil {
+					// Whatever came back is still worth applying. Absent node
+					// IDs are left alone, so a partial map only moves nodes
+					// forward onto credentials that arrived.
+					slog.Error("Failed to fetch updated credentials", "error", err)
+				}
+				sshService.UpdateCredentials(passwords)
+			}
 
-				// Always restart conman regardless of config update outcome.
+			if changed {
+				slog.Info("Credential changes detected, restarting conman")
 				if err := conmanService.SignalConmanTERM(); err != nil {
 					slog.Error("Failed to signal conman with SIGTERM", "error", err)
 				}
@@ -392,30 +369,11 @@ func runService(config remoteConsoleConfig) error {
 	// Create the SSH console manager.
 	sshManager := ssh.NewSSHConsoleManager(config.SSH, config.Creds.SshConsoleKeyPath, consoleLogsPath)
 
-	// Seed SSH nodes immediately — watchForNodesUpdates only fires after the first tick.
-	initialSSHNodes := filterSSHNodes(nodes.CurrentNodes())
-	if len(initialSSHNodes) > 0 {
-		initialXNames := filterXNames(initialSSHNodes)
-		passwords, err := credsService.GetPasswordsWithRetries(serviceCtx, initialXNames, 15, 10)
-		if err != nil {
-			// Start the nodes anyway. watchForNodesUpdates only reconfigures when
-			// inventory actually changes, so bailing out here would leave every
-			// SSH console dead until something in SMD happened to change.
-			slog.Warn("Failed to fetch initial SSH credentials, starting nodes without them", "error", err)
-		}
-		if err := sshManager.UpdateNodes(serviceCtx, initialSSHNodes); err != nil {
-			slog.Error("Failed initial SSH manager node update", "error", err)
-		}
-		if err == nil {
-			sshManager.UpdateCredentials(passwords)
-		}
-	}
-
 	// goroutine for log rotation
 	go logRotate(serviceCtx, config, conmanService, logsService, sshManager)
 
 	// goroutine to watches for changes in console configuration
-	go watchForNodesUpdates(serviceCtx, config, smdHTTPClient, conmanService, logsService, credsService, sshManager)
+	go watchForNodesUpdates(serviceCtx, config, smdHTTPClient, conmanService, logsService, sshManager)
 
 	// goroutine to run conman
 	go runConman(serviceCtx, conmanService, credsService)
