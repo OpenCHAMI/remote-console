@@ -271,6 +271,10 @@ func makePasswordsWith(ids []string, password string) map[string]compcredentials
 
 // newManager creates an SSHConsoleManager with fast reconnect intervals
 // suitable for tests.
+//
+// Pass logsDir as t.TempDir() at the call site — see waitOnCleanup for why the
+// order matters. Callers must cancel the context they hand to
+// UpdateNodes with defer, which runs before this cleanup.
 func newManager(t *testing.T, logsDir string) *ssh.SSHConsoleManager {
 	t.Helper()
 	cfg := ssh.DefaultSSHConfig()
@@ -278,8 +282,25 @@ func newManager(t *testing.T, logsDir string) *ssh.SSHConsoleManager {
 	cfg.ReconnectMinInterval = 250 * time.Millisecond
 	cfg.ReconnectMaxInterval = 1 * time.Second
 	manager := ssh.NewSSHConsoleManager(cfg, "", logsDir)
-	t.Cleanup(manager.Wait)
+	waitOnCleanup(t, manager)
 	return manager
+}
+
+// waitOnCleanup makes a test wait for the manager's node goroutines before it
+// finishes.
+//
+// A node opens its log file as the first thing Run does, and the manager only
+// ever asks nodes to stop. A test that hands t.TempDir() to a manager and
+// returns without waiting races its own cleanup: RemoveAll empties the
+// directory, a node goroutine gets scheduled and recreates the log file, and
+// the final rmdir fails with "directory not empty".
+//
+// Cleanups run last-in-first-out, so as long as the caller obtained logsDir
+// from t.TempDir() before reaching here, the wait happens first and the
+// directory is empty when it is removed.
+func waitOnCleanup(t *testing.T, manager *ssh.SSHConsoleManager) {
+	t.Helper()
+	t.Cleanup(manager.Wait)
 }
 
 // waitForMarker reads from ch until the accumulated output contains marker or
