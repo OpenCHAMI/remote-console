@@ -63,9 +63,10 @@ type SSHConsole struct {
 	stdinMu sync.Mutex
 
 	// logFile is opened at the start of Run and written only from the Run goroutine.
-	logFile     *os.File
-	logPath     string        // logsPath + "/console." + nodeID
-	reopenLogCh chan struct{} // buffered depth-1; signals broadcast to reopen after rotation
+	logFile      *os.File
+	logPath      string        // logsPath + "/console." + nodeID
+	reopenLogCh  chan struct{} // buffered depth-1; signals broadcast to reopen after rotation
+	logFormatter consoleLogFormatter
 
 	// cancel is called by the manager to stop the Run goroutine.
 	// ctx is NOT stored in the struct to avoid the go vet context-in-struct antipattern.
@@ -76,14 +77,15 @@ type SSHConsole struct {
 // node.cancel and call go node.Run(nodeCtx) after construction.
 func newSSHConsole(nodeID string, info *nodes.NodeConsoleInfo, creds compcredentials.CompCredentials, keyPath, logPath string, cfg SSHConfig) *SSHConsole {
 	return &SSHConsole{
-		nodeID:      nodeID,
-		info:        info,
-		keyPath:     keyPath,
-		cfg:         cfg,
-		creds:       creds,
-		clients:     make(map[string]*consoleClient),
-		logPath:     logPath,
-		reopenLogCh: make(chan struct{}, 1),
+		nodeID:       nodeID,
+		info:         info,
+		keyPath:      keyPath,
+		cfg:          cfg,
+		creds:        creds,
+		clients:      make(map[string]*consoleClient),
+		logPath:      logPath,
+		reopenLogCh:  make(chan struct{}, 1),
+		logFormatter: newConsoleLogFormatter(),
 	}
 }
 
@@ -460,6 +462,7 @@ func (c *SSHConsole) broadcast(data []byte) {
 		if c.logFile != nil {
 			_ = c.logFile.Close()
 		}
+		c.logFormatter.reset()
 		var err error
 		c.logFile, err = os.OpenFile(c.logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 		if err != nil {
@@ -470,7 +473,8 @@ func (c *SSHConsole) broadcast(data []byte) {
 	}
 
 	if c.logFile != nil {
-		if _, err := c.logFile.Write(data); err != nil {
+		logData := c.logFormatter.format(data, time.Now())
+		if _, err := c.logFile.Write(logData); err != nil {
 			slog.Warn("Failed to write to SSH console log", "nodeID", c.nodeID, "error", err)
 		}
 	}
