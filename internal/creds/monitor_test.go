@@ -56,10 +56,6 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 
 	require.False(t, changed, "Passwords should not have changed")
 
-	// Call GetPasswordsWithRetry to set previousPasswords
-	_, err = service.GetPasswordsWithRetries(context.Background(), nodes, 3, 1)
-	require.NoError(t, err)
-
 	// Now change a password
 	value := map[string]string{
 		"Username": "admin",
@@ -76,6 +72,15 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	}
 
 	require.True(t, changed, "Passwords should have changed")
+
+	// Reading a subset for conman must not replace the complete comparison
+	// snapshot and make the omitted node look changed on every refresh.
+	_, err = service.GetPasswordsWithRetries(context.Background(), nodes[:1], 1, 0)
+	require.NoError(t, err)
+
+	changed, err = service.checkIfPasswordsChanged(nodes)
+	require.NoError(t, err)
+	require.False(t, changed, "A subset read should not poison the credential snapshot")
 }
 
 func TestCheckIfKeysChanged(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/ssh"
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail/ratelimiter"
 )
@@ -200,7 +201,7 @@ func newInteractiveConsoleSession(nodeID string, conn *websocket.Conn, cio conso
 	return session
 }
 
-func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, r *http.Request) {
+func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, r *http.Request, sshMgr *ssh.SSHConsoleManager) {
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
@@ -216,13 +217,15 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 		http.Error(w, "Node doesn't exist", http.StatusNotFound)
 		return
 	}
+	useSSH := node.IsSSH()
+
 	if ok := sessions.reserve(nodeID); !ok {
 		http.Error(w, fmt.Sprintf("Console %s is already in use", nodeID), http.StatusConflict)
 		return
 	}
 	defer sessions.release(nodeID)
 
-	slog.Info("Starting interactive console session", "nodeID", nodeID, "backend", "conman")
+	slog.Info("Starting interactive console session", "nodeID", nodeID, "backend", map[bool]string{true: "ssh", false: "conman"}[useSSH])
 
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -233,7 +236,12 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 	}
 
 	// From here on, errors must be sent via WebSocket close frames
-	cio, err := newConmanConsoleIO(nodeID)
+	var cio consoleIO
+	if useSSH {
+		cio, err = newSSHConsoleIO(nodeID, sshMgr)
+	} else {
+		cio, err = newConmanConsoleIO(nodeID)
+	}
 	if err != nil {
 		slog.Error("Failed to create console IO backend", "nodeID", nodeID, "error", err)
 		_ = conn.WriteMessage(websocket.CloseMessage,
