@@ -34,7 +34,7 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.1.7
 	github.com/nxadm/tail v1.4.11
 	github.com/openchami/chi-middleware/auth v0.0.0-20240812224658-b16b83c70700
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/vault v0.44.0
@@ -122,6 +122,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.11.0 // indirect
