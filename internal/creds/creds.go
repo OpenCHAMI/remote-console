@@ -141,8 +141,6 @@ func (cs *CredsService) GetPasswordsWithRetries(ctx context.Context, bmcXNames [
 	}
 	slog.Warn("Maximum password attempts reached, configuring conman with what we have")
 
-	cs.previousPasswords = passwords
-
 	return passwords, err
 }
 
