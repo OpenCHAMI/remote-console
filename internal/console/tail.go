@@ -298,7 +298,7 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 	slog.Info("Tailing console for node", "nodeID", nodeID)
 
 	// Make sure we are monitoring a valid node
-	if exists := nodes.IsCurrentNode(nodeID); !exists {
+	if nodes.CurrentNode(nodeID) == nil {
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
