@@ -100,11 +100,11 @@ precedence over environment variables.
 
 | Flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
+| `--console-logs-base-path` | `RCS_CONSOLE_LOGS_BASE_PATH` | `/var/log/conman` | Base path for console log files. |
 | `--conman-base-conf-file-path` | `RCS_CONMAN_BASE_CONF_FILE_PATH` | `/app/conman.conf.tmpl` | Path to the base conman configuration template file. |
 | `--conman-conf-file-path` | `RCS_CONMAN_CONF_FILE_PATH` | `/app/conman.conf` | Path to the generated conman configuration file. |
-| `--conman-logs-path` | `RCS_CONMAN_LOGS_PATH` | `/var/log/conman` | Path to conman log files. |
+| `--conman-logs-path` | `RCS_CONMAN_LOGS_PATH` | `/var/log/conman` | Deprecated alias for `--console-logs-base-path`. |
 | `--conman-pid-file-path` | `RCS_CONMAN_PID_FILE_PATH` | `/var/run/conman.pid` | Path to the conman PID file. |
-| `--conman-console-scripts-path` | `RCS_CONMAN_CONSOLE_SCRIPTS_PATH` | `/usr/bin` | Path to console helper scripts. |
 | `--creds-ssh-console-key-path` | `RCS_CREDS_SSH_CONSOLE_KEY_PATH` | `/app/conman.key` | Path where the SSH private key file for console access is written. |
 | `--creds-vault-base-path` | `RCS_CREDS_VAULT_BASE_PATH` | empty | Base path in Vault where credentials are stored. |
 | `--creds-vault-role` | `RCS_CREDS_VAULT_ROLE` | empty | Vault role to use when authenticating to Vault. |
@@ -112,6 +112,9 @@ precedence over environment variables.
 | `--creds-local-store-key` | `RCS_CREDS_LOCAL_STORE_KEY` | empty | Key to use for local secure storage decryption. |
 | `--creds-secure-storage-ssh-keys-path` | `RCS_CREDS_SECURE_STORAGE_SSH_KEYS_PATH` | empty | Path where SSH keys can be found in secure storage. Leave empty to skip SSH key management. |
 | `--creds-secure-storage-passwords-path` | `RCS_CREDS_SECURE_STORAGE_PASSWORDS_PATH` | `hms-creds` | Path where console access credentials can be found in secure storage. |
+| `--ssh-terminal-type` | `RCS_SSH_TERMINAL_TYPE` | `xterm-256color` | Terminal type for SSH PTY requests. |
+| `--ssh-tcp-keep-alive` | `RCS_SSH_TCP_KEEP_ALIVE` | `3m` | TCP keepalive interval for SSH connections. Zero disables keepalive. |
+| `--ssh-connect-timeout` | `RCS_SSH_CONNECT_TIMEOUT` | `30s` | Deadline for the TCP dial and SSH handshake. |
 | `--http-listen` | `RCS_HTTP_LISTEN` | `0.0.0.0:26776` | HTTP listen address. |
 | `--new-node-lookup` | `RCS_NEW_NODE_LOOKUP` | `120` | Interval in seconds to look for new nodes. |
 | `--creds-monitor-interval` | `RCS_CREDS_MONITOR_INTERVAL` | `30` | Interval in seconds to monitor credential updates. |

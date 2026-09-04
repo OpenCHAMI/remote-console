@@ -17,8 +17,6 @@ RUN apt -y install conman less vim ssh jq tar procps inotify-tools
 
 COPY ${TARGETPLATFORM}/remote-console /app/
 COPY scripts/conman.conf.tmpl /app/conman.conf.tmpl
-COPY scripts/ssh-key-console /usr/bin/
-COPY scripts/ssh-pwd-console /usr/bin/
 COPY configs /app/configs
 
 RUN chown -Rv 65534:65534 /app /etc/conman.conf
@@ -80,14 +78,11 @@ RUN set -eux \
 # Copy in the needed files
 COPY --from=builder /usr/local/bin/remote-console /app/
 COPY scripts/conman.conf.tmpl /app/conman.conf.tmpl
-COPY scripts/ssh-key-console /usr/bin/
-COPY scripts/ssh-pwd-console /usr/bin/
 COPY configs /app/configs
 
 # Aliases
 RUN echo 'alias ll="ls -l"' >> /root/.bashrc
 RUN echo 'alias vi="vim"' >> /root/.bashrc
-RUN chmod +775 /usr/bin/ssh-key-console /usr/bin/ssh-pwd-console
 
 # Create log directories and set ownership to nobody (UID/GID 65534)
 RUN mkdir -p /var/log/conman/ /var/log/conman.old/ \
