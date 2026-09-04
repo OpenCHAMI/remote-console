@@ -243,6 +243,16 @@ func singleNode(t *testing.T, addr string) (id string, nodeMap map[string]*nodes
 	return
 }
 
+// makePasswordsWith builds a credential map assigning the same password to
+// every id.
+func makePasswordsWith(ids []string, password string) map[string]compcredentials.CompCredentials {
+	m := make(map[string]compcredentials.CompCredentials, len(ids))
+	for _, id := range ids {
+		m[id] = compcredentials.CompCredentials{Username: testSSHUser, Password: password}
+	}
+	return m
+}
+
 // newManager creates an SSHConsoleManager with fast reconnect intervals
 // suitable for tests.
 func newManager(t *testing.T, logsDir string) *ssh.SSHConsoleManager {
