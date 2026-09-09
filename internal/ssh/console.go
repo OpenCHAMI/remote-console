@@ -251,10 +251,8 @@ func (c *SSHConsole) currentCreds() compcredentials.CompCredentials {
 	return c.creds
 }
 
-// dialClient reads credentials, dials TCP, and completes the SSH handshake.
-func (c *SSHConsole) dialClient(ctx context.Context) (*gossh.Client, error) {
-	creds := c.currentCreds()
-
+// dialClient dials TCP and completes the SSH handshake with the supplied credentials.
+func (c *SSHConsole) dialClient(ctx context.Context, creds compcredentials.CompCredentials) (*gossh.Client, error) {
 	auth, err := c.buildAuth(creds)
 	if err != nil {
 		return nil, fmt.Errorf("build SSH auth: %w", err)
@@ -367,7 +365,8 @@ func (c *SSHConsole) startSession(client *gossh.Client) (stdout io.Reader, stdin
 // state. Returns the stdout reader on success; caller must drain it until
 // error/EOF.
 func (c *SSHConsole) connect(ctx context.Context) (io.Reader, error) {
-	client, err := c.dialClient(ctx)
+	creds := c.currentCreds()
+	client, err := c.dialClient(ctx, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -384,9 +383,16 @@ func (c *SSHConsole) connect(ctx context.Context) (io.Reader, error) {
 		}
 	}()
 
+	// Keep credential updates out until the authenticated client is registered.
+	c.credsMu.RLock()
+	if credsChanged(creds, c.creds) {
+		c.credsMu.RUnlock()
+		return nil, fmt.Errorf("SSH credentials changed during connection")
+	}
 	c.connMu.Lock()
 	c.sshClient = client
 	c.connMu.Unlock()
+	c.credsMu.RUnlock()
 
 	stdout, stdin, err := c.startSession(client)
 	if err != nil {
