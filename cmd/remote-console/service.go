@@ -432,12 +432,13 @@ func runService(config remoteConsoleConfig) error {
 			}
 		}()
 
-		// Stop background goroutines and wait for SSH console cleanup
+		// Stop accepting HTTP connections and drain requests while consoles are available.
+		err := server.Shutdown(shutdownCtx)
+
+		// HTTP shutdown does not close WebSockets. Stop consoles explicitly and wait
+		// for their cleanup, including when HTTP draining fails.
 		serviceStopCtx()
 		sshManager.Shutdown()
-
-		// Trigger graceful shutdown
-		err := server.Shutdown(shutdownCtx)
 		if err != nil {
 			slog.Error("Failed to shutdown HTTP server gracefully", "error", err)
 			os.Exit(1)
