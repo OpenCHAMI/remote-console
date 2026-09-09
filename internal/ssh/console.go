@@ -585,12 +585,12 @@ func (c *SSHConsole) Write(p []byte) (int, error) {
 func (c *SSHConsole) UpdateCreds(creds compcredentials.CompCredentials) {
 	c.credsMu.Lock()
 	c.creds = creds
-	c.credsMu.Unlock()
 
-	// Close the current connection to trigger reconnect with new creds.
+	// Capture the old client before a connection using the new credentials can register.
 	c.connMu.Lock()
 	client := c.sshClient
 	c.connMu.Unlock()
+	c.credsMu.Unlock()
 	if client != nil {
 		_ = client.Close()
 	}
