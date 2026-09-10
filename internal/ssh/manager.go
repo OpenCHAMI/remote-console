@@ -6,6 +6,7 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -15,6 +16,10 @@ import (
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
+
+// ErrNotConnected means a managed console is temporarily disconnected. Write discards input and
+// returns this error until reconnect.
+var ErrNotConnected = errors.New("ssh console console not connected")
 
 // SSHConsoleManager manages the set of active SSHConsoleNodes.
 type SSHConsoleManager struct {
@@ -175,7 +180,7 @@ func (m *SSHConsoleManager) Detach(nodeID, clientID string) {
 	}
 }
 
-// Write sends data to the SSH session stdin for a console.
+// Write sends data to a console and distinguishes unmanaged nodes from temporary disconnections.
 func (m *SSHConsoleManager) Write(nodeID string, p []byte) (int, error) {
 	m.consolesMu.RLock()
 	console, ok := m.consoles[nodeID]

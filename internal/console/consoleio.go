@@ -4,14 +4,18 @@
 
 package console
 
-// consoleIO abstracts the underlying console backend (PTY/conman or SSH).
-// Implementations handle reconnection internally; Output() is closed only on
-// permanent shutdown (context cancelled or node removed from inventory).
+import "errors"
+
+// errNotConnected means the backend is temporarily disconnected.
+// Callers should drop the input and keep the session open while it reconnects.
+var errNotConnected = errors.New("console backend not connected")
+
+// consoleIO provides I/O for PTY, conman, and SSH backends.
 type consoleIO interface {
-	// Output returns a channel of console output chunks. The channel is closed
-	// when the backend shuts down permanently.
+	// Output returns console output and closes on permanent shutdown.
 	Output() <-chan []byte
-	// Write sends data to the console (user input).
+	// Write sends input to the console. It returns errNotConnected without
+	// writing while reconnecting. Check wrapped errors with errors.Is.
 	Write(p []byte) (n int, err error)
 	// Close shuts down the backend. Safe to call multiple times.
 	Close() error
