@@ -75,25 +75,23 @@ func (s *interactiveConsoleSession) close() {
 func (s *interactiveConsoleSession) closeWithReason(reason sessionCloseReason, message string) {
 	slog.Info("Closing interactive console session", "nodeID", s.nodeID)
 
-	// 1. Shut down the backend (SSH detach or PTY SIGTERM). Idempotent.
+	// Shut down the backend (SSH detach or PTY SIGTERM). Idempotent.
 	if err := s.io.Close(); err != nil {
 		slog.Debug("Error closing console IO", "nodeID", s.nodeID, "error", err)
 	}
 
-	// 2. Cancel the session context to unblock both goroutines.
+	// Cancel the session context to unblock both goroutines.
 	if s.cancel != nil {
 		s.cancel()
 	}
 
-	// 3. Send a WebSocket close frame. This causes writePump to close the
-	//    underlying TCP connection, which unblocks streamInput's ReadMessage.
+	// Send a WebSocket close frame. This causes writePump to close the
+	// underlying TCP connection, which unblocks streamInput's ReadMessage.
 	s.ws.close(reason, message)
 }
 
 // streamOutput reads console output from the backend and writes it to the WebSocket.
 func (s *interactiveConsoleSession) streamOutput(ctx context.Context) {
-	defer s.wg.Done()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,6 +108,7 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context) {
 			// Apply rate limiting.
 			kb := uint16((len(data) + 1023) / 1024)
 			for !s.rateLimiter.Pour(kb) {
+				// Keep shutdown responsive while waiting for capacity.
 				select {
 				case <-ctx.Done():
 					return
@@ -131,8 +130,6 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context) {
 
 // streamInput reads from the WebSocket and writes user input to the console backend.
 func (s *interactiveConsoleSession) streamInput(ctx context.Context) {
-	defer s.wg.Done()
-
 	for {
 		select {
 		// Check for session closure
@@ -164,9 +161,7 @@ func (s *interactiveConsoleSession) streamInput(ctx context.Context) {
 		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
 			if _, err := s.io.Write(message); err != nil {
 				if errors.Is(err, errNotConnected) {
-					// The backend is between connections. Discard the input and
-					// keep the client attached — it reconnects on its own, and
-					// the client sees the reconnect marker on the output stream.
+					// Drop input while the backend reconnects and keep the client attached.
 					slog.Debug("Dropped console input, backend not connected",
 						"nodeID", s.nodeID, "bytes", len(message))
 					continue
@@ -180,17 +175,24 @@ func (s *interactiveConsoleSession) streamInput(ctx context.Context) {
 }
 
 // Start launches the session goroutines and blocks until both exit.
-func (s *interactiveConsoleSession) Start() {
-	sessionCtx, cancel := context.WithCancel(context.Background())
+func (s *interactiveConsoleSession) Start(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	sessionCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 
 	// Start WebSocket session
 	s.ws.Start()
 
 	// Start I/O goroutines
-	s.wg.Add(2)
-	go s.streamInput(sessionCtx)
-	go s.streamOutput(sessionCtx)
+	s.wg.Go(func() {
+		s.streamInput(sessionCtx)
+	})
+	s.wg.Go(func() {
+		s.streamOutput(sessionCtx)
+	})
 
 	// Wait for I/O goroutines to complete
 	s.wg.Wait()
@@ -247,7 +249,6 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 		http.Error(w, "Node doesn't exist", http.StatusNotFound)
 		return
 	}
-	useSSH := node.IsSSH()
 
 	if ok := sessions.reserve(nodeID); !ok {
 		http.Error(w, fmt.Sprintf("Console %s is already in use", nodeID), http.StatusConflict)
@@ -255,7 +256,7 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 	}
 	defer sessions.release(nodeID)
 
-	slog.Info("Starting interactive console session", "nodeID", nodeID, "backend", map[bool]string{true: "ssh", false: "conman"}[useSSH])
+	slog.Info("Starting interactive console session", "nodeID", nodeID)
 
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -282,7 +283,7 @@ func doInteractiveConsole(sessions *interactiveSessions, w http.ResponseWriter, 
 	defer session.close() // Ensure cleanup always happens
 
 	// Start session (blocks until all goroutines complete)
-	session.Start()
+	session.Start(r.Context())
 
 	slog.Info("Interactive console session ended", "nodeID", nodeID)
 }
