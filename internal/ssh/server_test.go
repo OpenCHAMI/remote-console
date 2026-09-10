@@ -8,6 +8,7 @@ package ssh_test
 // concurrent, and node-behaviour tests.
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
@@ -243,6 +244,21 @@ func singleNode(t *testing.T, addr string) (id string, nodeMap map[string]*nodes
 	return
 }
 
+// startNodes follows service ordering by registering membership before delivering credentials.
+func startNodes(
+	t *testing.T,
+	manager *ssh.SSHConsoleManager,
+	ctx context.Context,
+	nodeMap map[string]*nodes.NodeConsoleInfo,
+	passwords map[string]compcredentials.CompCredentials,
+) {
+	t.Helper()
+	if err := manager.UpdateNodes(ctx, nodeMap); err != nil {
+		t.Fatalf("UpdateNodes: %v", err)
+	}
+	manager.UpdateCredentials(passwords)
+}
+
 // makePasswordsWith builds a credential map assigning the same password to
 // every id.
 func makePasswordsWith(ids []string, password string) map[string]compcredentials.CompCredentials {
@@ -261,7 +277,9 @@ func newManager(t *testing.T, logsDir string) *ssh.SSHConsoleManager {
 	cfg.TCPKeepAlive = 0
 	cfg.ReconnectMinInterval = 250 * time.Millisecond
 	cfg.ReconnectMaxInterval = 1 * time.Second
-	return ssh.NewSSHConsoleManager(cfg, "", logsDir)
+	manager := ssh.NewSSHConsoleManager(cfg, "", logsDir)
+	t.Cleanup(manager.Wait)
+	return manager
 }
 
 // waitForMarker reads from ch until the accumulated output contains marker or
