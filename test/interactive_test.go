@@ -297,6 +297,66 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveConmanReconnect() {
 	s.Require().Contains(output, expectedHostLine)
 }
 
+func (s *IntegrationTestSuite) TestConsoleInteractiveConmanRemoval() {
+	console := consoleFixtures["ipmi"]
+	nodeID := console.nodeID
+	ctx := context.Background()
+
+	wsConn, resp, err := s.connectInteractiveConsole(nodeID, console.prompt, 90*time.Second)
+	s.Require().NoError(err)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.T().Logf("Warning: failed to close response body: %v", err)
+		}
+		if err := wsConn.Close(); err != nil {
+			s.T().Logf("Warning: failed to close websocket: %v", err)
+		}
+	}()
+
+	smdAPIURL, err := getSMDAPIURL(ctx, s.containers["smd"])
+	s.Require().NoError(err)
+
+	removed := false
+	defer func() {
+		if !removed {
+			return
+		}
+		err := loadRedfishEndpoint(s.T(), context.Background(), smdAPIURL, redfishEndpoint{
+			Host:     nodeID,
+			Username: console.username,
+			Password: console.password,
+		})
+		if err != nil {
+			s.T().Errorf("Failed to restore Redfish endpoint %s: %v", nodeID, err)
+			return
+		}
+		if err := s.waitForConsoleID(nodeID, 3*time.Minute); err != nil {
+			s.T().Errorf("Remote-console did not restore console %s: %v", nodeID, err)
+		}
+	}()
+
+	err = deleteRedfishEndpoint(s.T(), ctx, smdAPIURL, nodeID)
+	s.Require().NoError(err, "failed to remove IPMI Redfish endpoint")
+	removed = true
+	s.Require().NoError(s.waitForConsoleRemoval(nodeID, 3*time.Minute),
+		"remote-console did not remove the IPMI console")
+
+	// ConMan waits for FreeIPMI to close active SOL sessions during shutdown.
+	s.Require().NoError(wsConn.SetReadDeadline(time.Now().Add(90 * time.Second)))
+	var output strings.Builder
+	for {
+		_, message, err := wsConn.ReadMessage()
+		if err != nil {
+			var closeErr *websocket.CloseError
+			s.Require().ErrorAs(err, &closeErr, "expected the removed console session to close")
+			break
+		}
+		output.Write(message)
+	}
+	s.Require().NotContains(output.String(), fmt.Sprintf("[Reconnecting to %s...]", nodeID),
+		"removed console should not reconnect")
+}
+
 func (s *IntegrationTestSuite) TestConsoleInteractiveNewNodeNoDisrupt() {
 	// Verify that adding a new SSH node does not disrupt an existing interactive session.
 	// Previously (conman era) adding a node caused conmand to restart, which briefly

@@ -10,6 +10,7 @@ package conman
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,7 +21,6 @@ import (
 	"sync"
 	"syscall"
 	"text/template"
-	"time"
 
 	"github.com/Cray-HPE/hms-compcredentials"
 
@@ -34,11 +34,7 @@ type ConmanService struct {
 }
 
 func NewConmanService(config ConmanConfig) *ConmanService {
-	return &ConmanService{
-		config:  config,
-		mutex:   sync.Mutex{},
-		command: nil,
-	}
+	return &ConmanService{config: config}
 }
 
 func (cs *ConmanService) ConfigureConman(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error) {
@@ -100,7 +96,6 @@ func generateIPMIConsoleConfig(nci *nodes.NodeConsoleInfo, creds compcredentials
 		nci.ID, nci.ConnectionHost, creds.Username, creds.Password)
 }
 
-
 func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
 	slog.Info("Updating conman configuration file")
 
@@ -140,16 +135,18 @@ func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 		case nodes.IPMI:
 			creds, ok := passwords[nci.ID]
 			if !ok {
-				slog.Warn("No credentials found for node", "nodeID", nci.ID)
+				// No entry for this node yet. Leaving it out beats writing a
+				// console with empty credentials, which conmand would accept and
+				// then fail to authenticate with over and over.
+				slog.Warn("No credentials found for node; leaving it out of the conman config", "nodeID", nci.ID)
+				continue
 			}
 			consoles = append(consoles, generateIPMIConsoleConfig(nci, creds))
 			ipmiCount++
 
 		case nodes.SSH:
 			// Callers filter to IPMI nodes before calling, so reaching this is a
-			// caller bug rather than routine. Skipping is still the right
-			// response: writing a conman console for an SSH node would put a
-			// second process on a console SSHConsoleManager is already driving.
+			// caller bug.
 			slog.Error("SSH node passed to conman config; skipping", "nodeID", nci.ID)
 		}
 	}
@@ -162,43 +159,50 @@ func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 		}
 	}
 
-	// Only report hasNodes=true for IPMI nodes; SSH nodes don't need conman.
+	// Only report hasNodes=true for IPMI nodes that were actually written.
+	// When that leaves nothing, runConman waits and tries again rather than
+	// starting conmand on an empty config.
 	return ipmiCount > 0, nil
 }
 
 // SignalConmanTERM sends SIGTERM to running conmand process
 func (cs *ConmanService) SignalConmanTERM() error {
-	if cs.command != nil {
-		slog.Info("Signaling conman with SIGTERM")
-		if err := cs.command.Process.Signal(syscall.SIGTERM); err != nil {
-			return fmt.Errorf("failed to signal conman with SIGTERM: %w", err)
-		}
-	} else {
-		slog.Warn("Attempting to signal conman process when nil")
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+
+	if cs.command == nil || cs.command.Process == nil {
+		slog.Debug("Conmand is not running, skipping SIGTERM")
+		return nil
 	}
-		
+
+	slog.Info("Signaling conman with SIGTERM")
+	if err := cs.command.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("failed to signal conman with SIGTERM: %w", err)
+	}
 	return nil
 }
 
 // SignalConmanHUP sends SIGHUP to running conmand process
 func (cs *ConmanService) SignalConmanHUP() error {
-	if cs.command != nil {
-		slog.Info("Signaling conman with SIGHUP")
-		if err := cs.command.Process.Signal(syscall.SIGHUP); err != nil {
-			return fmt.Errorf("failed to signal conman with SIGHUP: %w", err)
-		}
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+
+	if cs.command == nil || cs.command.Process == nil {
+		slog.Debug("Conmand is not running, skipping SIGHUP")
 		return nil
-	} else {
-		slog.Warn("Attempting to signal conman process when nil")
 	}
 
+	slog.Info("Signaling conman with SIGHUP")
+	if err := cs.command.Process.Signal(syscall.SIGHUP); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("failed to signal conman with SIGHUP: %w", err)
+	}
 	return nil
 }
 
 // logPipeOutput takes the output of a pipe and logs it
-func logPipeOutput(readPipe *io.ReadCloser, desc string) {
+func logPipeOutput(readPipe io.ReadCloser, desc string) {
 	slog.Debug("Starting conmand pipe logging", "pipe", desc)
-	er := bufio.NewReader(*readPipe)
+	er := bufio.NewReader(readPipe)
 	for {
 		// read the next line
 		line, err := er.ReadString('\n')
@@ -210,35 +214,57 @@ func logPipeOutput(readPipe *io.ReadCloser, desc string) {
 	}
 }
 
+func (cs *ConmanService) startConman() (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+
+	if cs.command != nil {
+		return nil, nil, nil, fmt.Errorf("command not nil on entry to executeConman")
+	}
+
+	command := exec.Command("conmand", "-F", "-v", "-c", cs.config.ConfFilePath)
+	cmdStdErr, err := command.StderrPipe()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to connect to conmand stderr pipe: %w", err)
+	}
+	cmdStdOut, err := command.StdoutPipe()
+	if err != nil {
+		_ = cmdStdErr.Close()
+		return nil, nil, nil, fmt.Errorf("unable to connect to conmand stdout pipe: %w", err)
+	}
+
+	slog.Info("Starting conmand process")
+	if err = command.Start(); err != nil {
+		_ = cmdStdErr.Close()
+		_ = cmdStdOut.Close()
+		return nil, nil, nil, fmt.Errorf("unable to start command: %w", err)
+	}
+
+	cs.command = command
+	return command, cmdStdErr, cmdStdOut, nil
+}
+
 // ExecuteConman starts conmand and waits for it to exit
 func (cs *ConmanService) ExecuteConman() error {
 	slog.Info("Starting new instance of conmand")
-	if cs.command != nil {
-		return fmt.Errorf("command not nil on entry to executeConman")
-	}
-	cs.command = exec.Command("conmand", "-F", "-v", "-c", cs.config.ConfFilePath)
-	cmdStdErr, err := cs.command.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("unable to connect to conmand stderr pipe: %w", err)
-	}
-	cmdStdOut, err := cs.command.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("unable to connect to conmand stdout pipe: %w", err)
-	}
-	go logPipeOutput(&cmdStdErr, "stderr")
-	go logPipeOutput(&cmdStdOut, "stdout")
 
-	slog.Info("Starting conmand process")
-	if err = cs.command.Start(); err != nil {
-		return fmt.Errorf("unable to start command: %w", err)
+	command, cmdStdErr, cmdStdOut, err := cs.startConman()
+	if err != nil {
+		return err
 	}
 
-	if err = cs.command.Wait(); err != nil {
+	go logPipeOutput(cmdStdErr, "stderr")
+	go logPipeOutput(cmdStdOut, "stdout")
+
+	if err = command.Wait(); err != nil {
 		slog.Error("Conmand process exited with error", "error", err)
-		time.Sleep(15 * time.Second)
 	}
 
-	cs.command = nil
+	cs.mutex.Lock()
+	if cs.command == command {
+		cs.command = nil
+	}
+	cs.mutex.Unlock()
 	slog.Info("Conmand process has exited")
 
 	return nil
