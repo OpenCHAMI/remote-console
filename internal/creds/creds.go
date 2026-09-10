@@ -9,20 +9,26 @@ package creds
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
-	"time"
+	"sync"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	sstorage "github.com/Cray-HPE/hms-securestorage"
 )
 
 type CredsService struct {
-	config                 CredsConfig
-	previousPasswords      map[string]compcreds.CompCredentials
+	config CredsConfig
+
+	// passwordsMu guards passwords.
+	passwordsMu sync.RWMutex
+
+	// passwords is the credential snapshot from the last inventory refresh.
+	// checkIfPasswordsChanged is its only writer.
+	passwords map[string]compcreds.CompCredentials
+
 	previousPrivateKeyHash []byte
 	previousCertHash       []byte
 }
@@ -30,7 +36,7 @@ type CredsService struct {
 func NewCredsService(config CredsConfig) *CredsService {
 	return &CredsService{
 		config:                 config,
-		previousPasswords:      nil,
+		passwords:              nil,
 		previousPrivateKeyHash: nil,
 		previousCertHash:       nil,
 	}
@@ -96,52 +102,19 @@ func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.
 	return ccreds, nil
 }
 
-// Look up the creds for the input endpoints with retries
-func (cs *CredsService) GetPasswordsWithRetries(ctx context.Context, bmcXNames []string, maxTries, waitSecs int) (map[string]compcreds.CompCredentials, error) {
-	var passwords map[string]compcreds.CompCredentials = nil
-	var err error = nil
-	for numTries := 0; numTries < maxTries; numTries++ {
-		select {
-		case <-ctx.Done():
-			slog.Info("Stopping credential retrieval due to context cancellation")
-			return passwords, ctx.Err()
-		default:
-		}
+// GetPasswords returns credentials from the last refresh for the given xnames.
+// Missing credentials are omitted. CheckForUpdates refreshes the snapshot.
+func (cs *CredsService) GetPasswords(xnames []string) map[string]compcreds.CompCredentials {
+	cs.passwordsMu.RLock()
+	defer cs.passwordsMu.RUnlock()
 
-		slog.Debug("Get passwords with retry", "attempt", numTries)
-		passwords, err = getPasswords(cs.config, bmcXNames)
-
-		slog.Debug("Passwords retrieved", "count", len(passwords))
-
-		if err != nil {
-			slog.Error("Error retrieving passwords", "error", err)
-		}
-
-		foundAll := true
-		for _, nn := range bmcXNames {
-			_, ok := passwords[nn]
-			if !ok {
-				slog.Warn("Missing credentials for", "xname", nn)
-				foundAll = false
-			}
-		}
-		if foundAll {
-			slog.Info("Retrieved all passwords")
-			break
-		}
-		slog.Warn("Only retrieved subset of creds from vault, waiting and trying again",
-			"attempt", numTries, "retrieved", len(passwords), "total", len(bmcXNames))
-
-		select {
-		case <-ctx.Done():
-			slog.Info("Stopping credential retrieval due to context cancellation")
-			return passwords, ctx.Err()
-		case <-time.After(time.Duration(waitSecs) * time.Second):
+	passwords := make(map[string]compcreds.CompCredentials, len(xnames))
+	for _, xname := range xnames {
+		if creds, ok := cs.passwords[xname]; ok {
+			passwords[xname] = creds
 		}
 	}
-	slog.Warn("Maximum password attempts reached, configuring conman with what we have")
-
-	return passwords, err
+	return passwords
 }
 
 func hashString(s string) ([]byte, error) {

@@ -154,13 +154,8 @@ func TestUpdateNodesAddsAndRemovesNodes(t *testing.T) {
 	}
 }
 
-// TestUpdateCredentialsIgnoresAbsentNodes pins the property that lets callers
-// pass a credential map they cannot vouch for. GetPasswordsWithRetries returns
-// whatever it managed to fetch with a nil error once it exhausts its retries,
-// so an absent nodeID says nothing about the node — only that this fetch did
-// not bring it back. UpdateCredentials must therefore leave absent nodes alone:
-// treating absence as a change would tear down a working console every time the
-// credential store had a bad minute.
+// TestUpdateCredentialsIgnoresAbsentNodes verifies partial snapshots do not disrupt working
+// consoles. A missing entry is not evidence of deletion, so existing credentials remain active.
 func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {
 	sessionCh := make(chan *sshSession)
 	srv := newSSHServer(t, func(ch gossh.Channel) { runSession(ch, sessionCh) })
@@ -181,7 +176,7 @@ func TestUpdateCredentialsIgnoresAbsentNodes(t *testing.T) {
 	sess := <-sessionCh
 	waitForMarker(t, clientCh, "[Console "+id+" connected at", 15*time.Second)
 
-	// An empty map — every node absent. Nothing may happen to this connection.
+	// An empty update must leave the connection unchanged.
 	manager.UpdateCredentials(map[string]compcredentials.CompCredentials{})
 
 	select {
