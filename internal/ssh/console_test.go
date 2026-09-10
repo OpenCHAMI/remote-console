@@ -14,7 +14,7 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 // TestSSHConsoleReconnect verifies automatic reconnection and status markers.

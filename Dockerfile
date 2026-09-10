@@ -41,15 +41,15 @@ RUN export GOPATH=$GOPATH
 RUN go env -w GO111MODULE=auto
 
 # Copy source files
-COPY cmd $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd
+COPY cmd $GOPATH/src/github.com/openchami/remote-console/v2/cmd
 COPY configs configs
 COPY scripts scripts
-COPY internal $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/internal
-COPY go.mod $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.mod
-COPY go.sum $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/go.sum
+COPY internal $GOPATH/src/github.com/openchami/remote-console/v2/internal
+COPY go.mod $GOPATH/src/github.com/openchami/remote-console/v2/go.mod
+COPY go.sum $GOPATH/src/github.com/openchami/remote-console/v2/go.sum
 
 # Build the image
-RUN set -ex && go build -C $GOPATH/src/github.com/OpenCHAMI/remote-console/v2/cmd/remote-console -v -o /usr/local/bin/remote-console
+RUN set -ex && go build -C $GOPATH/src/github.com/openchami/remote-console/v2/cmd/remote-console -v -o /usr/local/bin/remote-console
 
 ### Final Stage ###
 FROM ubuntu:26.04 AS final

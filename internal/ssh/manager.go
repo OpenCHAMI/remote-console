@@ -14,7 +14,7 @@ import (
 
 	"github.com/Cray-HPE/hms-compcredentials"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 // ErrNotConnected means a managed node is temporarily disconnected. Write discards input and

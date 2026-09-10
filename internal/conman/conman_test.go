@@ -15,7 +15,7 @@ import (
 	"github.com/Cray-HPE/hms-compcredentials"
 	"github.com/stretchr/testify/require"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 func TestGenerateBaseConfig(t *testing.T) {

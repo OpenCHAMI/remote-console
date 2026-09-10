@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 // HealthResponse - used to report service health stats

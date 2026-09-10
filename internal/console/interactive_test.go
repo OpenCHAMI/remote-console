@@ -17,8 +17,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 func TestReservationExclusive(t *testing.T) {

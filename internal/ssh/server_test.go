@@ -19,8 +19,8 @@ import (
 	"github.com/Cray-HPE/hms-compcredentials"
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 const (

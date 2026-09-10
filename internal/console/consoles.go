@@ -7,7 +7,7 @@ package console
 import (
 	"net/http"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 type ConsolesResponse struct {

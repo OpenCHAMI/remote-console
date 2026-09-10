@@ -20,7 +20,7 @@
 //
 // (MIT License)
 
-module github.com/OpenCHAMI/remote-console
+module github.com/openchami/remote-console
 
 go 1.26.0
 

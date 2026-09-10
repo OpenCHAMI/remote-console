@@ -9,10 +9,10 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/OpenCHAMI/remote-console/internal/conman"
-	"github.com/OpenCHAMI/remote-console/internal/creds"
-	"github.com/OpenCHAMI/remote-console/internal/logs"
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/conman"
+	"github.com/openchami/remote-console/internal/creds"
+	"github.com/openchami/remote-console/internal/logs"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 type OAuth2Config struct {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 func TestSSHConfigValidate(t *testing.T) {

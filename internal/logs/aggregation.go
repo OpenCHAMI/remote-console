@@ -18,7 +18,7 @@ import (
 
 	"github.com/nxadm/tail"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 // aggregateFile starts tailing a log file if not already running (idempotent)

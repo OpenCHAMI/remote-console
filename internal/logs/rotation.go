@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 // LogRotate initializes and starts log rotation

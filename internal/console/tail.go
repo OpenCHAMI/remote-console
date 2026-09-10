@@ -22,7 +22,7 @@ import (
 	"github.com/nxadm/tail"
 	"github.com/nxadm/tail/ratelimiter"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 type consoleTailSession struct {
