@@ -41,11 +41,11 @@ func NewConmanService(config ConmanConfig) *ConmanService {
 	}
 }
 
-func (cs *ConmanService) ConfigureConman(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string) (bool, error) {
+func (cs *ConmanService) ConfigureConman(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
-	return cs.updateConfigFile(nodeMap, passwords, sshConsoleKeyPath, true)
+	return cs.updateConfigFile(nodeMap, passwords, true)
 }
 
 func generateBaseConfig(config ConmanConfig) ([]byte, error) {
@@ -101,7 +101,7 @@ func generateIPMIConsoleConfig(nci *nodes.NodeConsoleInfo, creds compcredentials
 }
 
 
-func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string, forceUpdate bool) (bool, error) {
+func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
 	slog.Info("Updating conman configuration file")
 
 	bs, err := generateBaseConfig(cs.config)

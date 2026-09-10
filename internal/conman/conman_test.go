@@ -90,7 +90,7 @@ func TestConfigureConman(t *testing.T) {
 	service := NewConmanService(config)
 
 	// First call should create the config file
-	updated, err := service.ConfigureConman(nodes, passwords, "/tmp/ssh_console_key")
+	updated, err := service.ConfigureConman(nodes, passwords)
 	require.NoError(t, err)
 	require.True(t, updated)
 
