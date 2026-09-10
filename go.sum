@@ -12,6 +12,8 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/OpenCHAMI/jwtauth/v5 v5.0.0-20240321222802-e6cb468a2a18 h1:oBPtXp9RVm9lk5zTmDLf+Vh21yDHpulBxUqGJQjwQCk=
 github.com/OpenCHAMI/jwtauth/v5 v5.0.0-20240321222802-e6cb468a2a18/go.mod h1:ggNHWgLfW/WRXcE8ZZC4S7UwHif16HVmyowOCWdNSN8=
+github.com/OpenCHAMI/jwtauth/v5 v5.0.0-20260729162818-d6b185bd9ebc h1:bxQhWRtwfQNWXMFxZL/N08gOEtOxPNO1e0+SsS88BJc=
+github.com/OpenCHAMI/jwtauth/v5 v5.0.0-20260729162818-d6b185bd9ebc/go.mod h1:DhU6j/weKKyZSCV1UOsv9XhP3oRYYgfZqOPIzr46FFs=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
