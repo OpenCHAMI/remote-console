@@ -16,7 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	openchami_authenticator "github.com/openchami/chi-middleware/auth"
 
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 const routePrefix = "/remote-console"

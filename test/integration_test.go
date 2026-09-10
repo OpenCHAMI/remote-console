@@ -29,8 +29,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/network"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/OpenCHAMI/remote-console/internal/console"
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/console"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 const (

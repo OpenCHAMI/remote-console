@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 // clientIDCounter generates unique client IDs within a process.

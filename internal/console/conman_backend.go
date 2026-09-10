@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/creack/pty"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 const (

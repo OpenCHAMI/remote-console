@@ -16,12 +16,12 @@ import (
 	"time"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
-	"github.com/OpenCHAMI/remote-console/internal/conman"
-	"github.com/OpenCHAMI/remote-console/internal/console"
-	"github.com/OpenCHAMI/remote-console/internal/creds"
-	"github.com/OpenCHAMI/remote-console/internal/logs"
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
+	"github.com/openchami/remote-console/internal/conman"
+	"github.com/openchami/remote-console/internal/console"
+	"github.com/openchami/remote-console/internal/creds"
+	"github.com/openchami/remote-console/internal/logs"
+	"github.com/openchami/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/ssh"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )

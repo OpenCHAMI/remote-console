@@ -15,7 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 func TestWriteToAggLog(t *testing.T) {

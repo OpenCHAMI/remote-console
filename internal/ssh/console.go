@@ -19,7 +19,7 @@ import (
 	compcredentials "github.com/Cray-HPE/hms-compcredentials"
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/nodes"
 )
 
 // errNoCredentials means no credential entry has reached this node.

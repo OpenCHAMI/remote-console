@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/ssh"
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail/ratelimiter"
+	"github.com/openchami/remote-console/internal/nodes"
+	"github.com/openchami/remote-console/internal/ssh"
 )
 
 // interactiveSessions tracks which nodes currently have an active
