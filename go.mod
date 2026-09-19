@@ -31,7 +31,8 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/gorilla/websocket v1.5.3
-	github.com/lestrrat-go/jwx/v2 v2.1.7
+	github.com/lestrrat-go/jwx/v2 v2.1.1
+	github.com/lestrrat-go/jwx/v3 v3.3.0
 	github.com/nxadm/tail v1.4.11
 	github.com/openchami/chi-middleware/auth v0.0.0-20240812224658-b16b83c70700
 	github.com/stretchr/testify v1.12.1
