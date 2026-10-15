@@ -284,7 +284,10 @@ func runService(config remoteConsoleConfig) error {
 	if err != nil {
 		return fmt.Errorf("initialize inbound authentication: %w", err)
 	}
-	smdHTTPClient := newSMDHTTPClient(context.Background(), config)
+	smdHTTPClient, err := newSMDHTTPClient(serviceCtx, config)
+	if err != nil {
+		return fmt.Errorf("initialize SMD authentication: %w", err)
+	}
 	defer smdHTTPClient.CloseIdleConnections()
 
 	// Set up the zombie killer
