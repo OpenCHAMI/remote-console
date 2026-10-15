@@ -54,9 +54,10 @@ All routes are under `/remote-console`.
 | `GET /consoles/{nodeID}` | WebSocket interactive console session. |
 | `GET /consoles/{nodeID}?mode=tail` | WebSocket console log tail session. |
 
-The console endpoints are protected by JWT middleware when `--jwks-url` is set.
-If no JWKS URL is configured, console endpoints are left unprotected and the
-service logs a warning.
+The default `jwks` provider protects console endpoints when `--jwks-url` is set.
+Without that URL, the default provider leaves console endpoints unprotected and
+logs a warning. Optional [TokenSmith authentication and authorization](docs/tokensmith.md)
+protects console access.
 
 Tail mode supports:
 

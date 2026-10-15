@@ -4,6 +4,7 @@
 package console
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/openchami/remote-console/internal/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,8 +34,6 @@ func corruptSignature(token string) string {
 
 // Exercise the real router and JWKS middleware before changing providers.
 func TestJWKSAuthentication(t *testing.T) {
-	previous := TokenAuth
-	t.Cleanup(func() { TokenAuth = previous })
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	public, err := jwk.FromRaw(&key.PublicKey)
@@ -46,7 +46,8 @@ func TestJWKSAuthentication(t *testing.T) {
 		assert.NoError(t, json.NewEncoder(w).Encode(set))
 	}))
 	defer server.Close()
-	require.NoError(t, FetchPublicKeyFromURL(server.URL))
+	authentication, err := auth.NewJWKSAuth(context.Background(), auth.JWKSConfig{JWKSURL: server.URL})
+	require.NoError(t, err)
 	signer, err := jwk.FromRaw(key)
 	require.NoError(t, err)
 	require.NoError(t, signer.Set(jwk.KeyIDKey, "jwks-key"))
@@ -64,7 +65,7 @@ func TestJWKSAuthentication(t *testing.T) {
 		require.NoError(t, err)
 		return string(token)
 	}
-	router := SetupRoutes(t.TempDir(), nil)
+	router := SetupRoutes(t.TempDir(), nil, authentication)
 	for _, tc := range []struct {
 		name, token string
 		status      int
@@ -107,9 +108,9 @@ func TestJWKSAuthentication(t *testing.T) {
 	router.ServeHTTP(cookieResponse, cookieRequest)
 	require.Equal(t, http.StatusOK, cookieResponse.Code, "JWKS authentication supports JWT cookies")
 
-	TokenAuth = nil
+	disabledAuth, err := auth.NewJWKSAuth(context.Background(), auth.JWKSConfig{})
+	require.NoError(t, err)
 	rr := httptest.NewRecorder()
-	SetupRoutes(t.TempDir(), nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/remote-console/consoles", nil))
+	SetupRoutes(t.TempDir(), nil, disabledAuth).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/remote-console/consoles", nil))
 	require.Equal(t, http.StatusOK, rr.Code)
 }
-
