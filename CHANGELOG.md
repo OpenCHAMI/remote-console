@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional TokenSmith authentication and Casbin authorization for console endpoints.
+- Authentication regression tests for the existing JWKS and OAuth2 providers, and TokenSmith integration coverage.
+
 ## [2.4.0] - 2025-02-13
 ### Dependencies
 - CASMCMS-9282: Bump Alpine version from 3.15 to 3.21, because 3.15 no longer receives security patches

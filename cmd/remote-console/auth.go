@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/openchami/remote-console/internal/auth"
 	"golang.org/x/oauth2"
@@ -21,4 +23,15 @@ func newSMDHTTPClient(ctx context.Context, config remoteConsoleConfig) *http.Cli
 		client.Transport = &oauth2.Transport{Source: source, Base: http.DefaultTransport}
 	}
 	return client
+}
+
+func newInboundAuth(ctx context.Context, config remoteConsoleConfig) (auth.Auth, error) {
+	switch config.AuthProvider {
+	case "jwks":
+		return auth.NewJWKSAuth(ctx, auth.JWKSConfig{JWKSURL: config.JwksURL, RetryInterval: time.Duration(config.JwksFetchInterval) * time.Second})
+	case "tokensmith":
+		return auth.NewTokenSmithAuth(ctx, config.Tokensmith)
+	default:
+		return nil, fmt.Errorf("invalid auth-provider %q: use jwks or tokensmith", config.AuthProvider)
+	}
 }

@@ -278,6 +278,15 @@ func runConman(ctx context.Context, conmanService ConmanService, credService Cre
 func runService(config remoteConsoleConfig) error {
 
 	slog.Info("Remote console service starting")
+	serviceCtx, serviceStopCtx := context.WithCancel(context.Background())
+	defer serviceStopCtx()
+	authentication, err := newInboundAuth(serviceCtx, config)
+	if err != nil {
+		return fmt.Errorf("initialize inbound authentication: %w", err)
+	}
+	smdHTTPClient := newSMDHTTPClient(context.Background(), config)
+	defer smdHTTPClient.CloseIdleConnections()
+
 	// Set up the zombie killer
 	slog.Info("Starting zombie killer")
 	go conman.WatchForZombies()
@@ -304,12 +313,6 @@ func runService(config remoteConsoleConfig) error {
 		slog.Warn("Failed to ensure console SSH keys present", "error", err)
 	}
 
-	// Create service context for coordinating shutdown of background goroutines
-	serviceCtx, serviceStopCtx := context.WithCancel(context.Background())
-
-	smdHTTPClient := newSMDHTTPClient(context.Background(), config)
-	defer smdHTTPClient.CloseIdleConnections()
-
 	// Create the SSH console manager.
 	sshManager := ssh.NewSSHConsoleManager(config.SSH, config.Creds.SshConsoleKeyPath, consoleLogsPath)
 
@@ -325,42 +328,6 @@ func runService(config remoteConsoleConfig) error {
 	// goroutine watch for credential updates
 	go watchForCredUpdates(serviceCtx, config, credsService, conmanService, sshManager)
 
-	// Initialize JWT token authorization if JWKS URL is provided
-	if config.JwksURL != "" {
-		slog.Info("Fetching public key from JWKS URL", "url", config.JwksURL)
-		maxRetries := 5
-		var lastErr error
-		for i := 0; i <= maxRetries; i++ {
-			err := console.FetchPublicKeyFromURL(config.JwksURL)
-			if err != nil {
-				lastErr = err
-				slog.Error("Failed to fetch public key from JWKS URL",
-					"url", config.JwksURL,
-					"attempt", i+1,
-					"maxRetries", maxRetries+1,
-					"error", err)
-				if i < maxRetries {
-					time.Sleep(time.Duration(config.JwksFetchInterval) * time.Second)
-					continue
-				}
-			} else {
-				slog.Info("Successfully initialized JWT authentication")
-				lastErr = nil
-				break
-			}
-		}
-		if lastErr != nil {
-			// JWKS URL was explicitly provided but we couldn't fetch it
-			// This is a fatal error - don't start with unprotected endpoints
-			slog.Error("Failed to initialize JWT authentication after all retries - refusing to start with unprotected endpoints")
-			serviceStopCtx()
-			sshManager.Shutdown()
-			return fmt.Errorf("failed to fetch JWKS from %s: %w", config.JwksURL, lastErr)
-		}
-	} else {
-		slog.Warn("No JWKS URL provided - JWT authentication is disabled")
-	}
-
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs
 	//  to be cleaned up.  This will trap any signals and wait to
@@ -368,7 +335,7 @@ func runService(config remoteConsoleConfig) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
-	router := console.SetupRoutes(consoleLogsPath, sshManager)
+	router := console.SetupRoutes(consoleLogsPath, sshManager, authentication)
 
 	slog.Info("Starting HTTP server", "address", config.HttpListen)
 	server := &http.Server{Addr: config.HttpListen, Handler: router}
