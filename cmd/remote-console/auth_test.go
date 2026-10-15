@@ -4,9 +4,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,9 +16,50 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSMDProviderWarnings(t *testing.T) {
+	t.Setenv(tokenservice.ServiceIdentityCertEnvVar, "")
+	t.Setenv(tokenservice.ServiceIdentityKeyEnvVar, "")
+	t.Setenv(tokenservice.BootstrapTokenEnvVar, "bootstrap")
+	tokens := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		assert.NoError(t, json.NewEncoder(w).Encode(tokenservice.OAuthTokenResponse{
+			AccessToken: "service-token", ExpiresIn: 3600,
+			RefreshToken: "refresh", RefreshExpiresIn: 86400,
+		}))
+	}))
+	defer tokens.Close()
+
+	for _, provider := range []string{"oauth2", "tokensmith"} {
+		t.Run(provider, func(t *testing.T) {
+			var output bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&output, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			config := DefaultConfig()
+			config.SmdAuthProvider = provider
+			config.SmdTokensmith.URL = tokens.URL
+			if provider == "tokensmith" {
+				config.Oauth2.ClientSecret = "secret-must-not-be-logged"
+			}
+			client, err := newSMDHTTPClient(context.Background(), config)
+			require.NoError(t, err)
+			defer client.CloseIdleConnections()
+			if provider == "oauth2" {
+				require.Contains(t, output.String(), "Ignoring outbound TokenSmith settings")
+				require.NotContains(t, output.String(), "without TLS")
+			} else {
+				require.Contains(t, output.String(), "Ignoring OAuth2 settings")
+				require.Contains(t, output.String(), "bootstrap and refresh tokens will be sent without TLS")
+			}
+			require.NotContains(t, output.String(), "secret-must-not-be-logged")
+		})
+	}
+}
 
 func TestOAuth2SMDClient(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
@@ -48,7 +91,8 @@ func TestOAuth2SMDClient(t *testing.T) {
 			if enabled {
 				config.Oauth2 = OAuth2Config{ClientID: "console-service", ClientSecret: "test-secret", TokenURL: tokens.URL, Scopes: []string{"read", "inventory"}}
 			}
-			client := newSMDHTTPClient(context.Background(), config)
+			client, err := newSMDHTTPClient(context.Background(), config)
+			require.NoError(t, err)
 			require.Equal(t, smdHTTPTimeout, client.Timeout)
 			for range 2 {
 				resp, err := client.Get(smd.URL)
@@ -111,7 +155,8 @@ func TestOAuth2RefreshAndFailure(t *testing.T) {
 			defer smd.Close()
 			config := DefaultConfig()
 			config.Oauth2 = OAuth2Config{ClientID: "id", ClientSecret: "secret", TokenURL: tokens.URL, Scopes: []string{"read"}}
-			client := newSMDHTTPClient(context.Background(), config)
+			client, err := newSMDHTTPClient(context.Background(), config)
+			require.NoError(t, err)
 			for range 2 {
 				resp, err := client.Get(smd.URL)
 				if fail {

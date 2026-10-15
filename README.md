@@ -57,7 +57,7 @@ All routes are under `/remote-console`.
 The default `jwks` provider protects console endpoints when `--jwks-url` is set.
 Without that URL, the default provider leaves console endpoints unprotected and
 logs a warning. Optional [TokenSmith authentication and authorization](docs/tokensmith.md)
-protects console access.
+protects console access and can also supply outbound SMD service tokens.
 
 Tail mode supports:
 
@@ -137,7 +137,8 @@ precedence over environment variables.
 | `--log-rotate-file-path` | `RCS_LOG_ROTATE_FILE_PATH` | `/tmp/logrotate.conman` | Path to generated logrotate configuration file. |
 | `--log-rotate-state-file-path` | `RCS_LOG_ROTATE_STATE_FILE_PATH` | `/tmp/rot_conman.state` | Path to logrotate state file. |
 
-OAuth2 settings are all-or-nothing. If any OAuth2 field is set, all of
+With the default outbound `oauth2` provider, OAuth2 settings are all-or-nothing.
+If any OAuth2 field is set, all of
 `--oauth2-client-id`, `--oauth2-client-secret`, `--oauth2-token-url`, and
 `--oauth2-scopes` must be provided.
 
