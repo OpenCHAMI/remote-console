@@ -1,0 +1,7 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+# SPDX-License-Identifier: MIT
+
+# Listing and tail handshakes map to read; interactive handshakes map to write.
+p, role:remote-console-reader, /remote-console/consoles, read
+p, role:remote-console-reader, /remote-console/consoles/*, read
+p, role:remote-console-operator, /remote-console/consoles/*, write
