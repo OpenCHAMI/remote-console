@@ -5,6 +5,11 @@
 package nodes
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -173,4 +178,83 @@ func TestCurrentNode(t *testing.T) {
 
 	node.ConnectionType = SSH
 	require.Equal(t, IPMI, CurrentNode("ipmi").ConnectionType)
+}
+
+type smdRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f smdRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+const smdSnapshotResponse = `{"ComponentEndpoints":[{"ID":"x0c0s2b0","Enabled":true,"RedfishEndpointFQDN":"bmc.example","RedfishSystemInfo":{"SerialConsole":{"SSH":{"ServiceEnabled":true,"Port":22}}}}]}`
+
+func TestCheckForUpdatesPreservesSnapshotOnFailure(t *testing.T) {
+	testCases := []struct {
+		name   string
+		status int
+		body   string
+		err    error
+	}{
+		{name: "transport error", err: errors.New("SMD unavailable")},
+		{name: "service unavailable", status: http.StatusServiceUnavailable, body: `{}`},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: `{"error":"unauthorized"}`},
+		{name: "error with inventory", status: http.StatusServiceUnavailable, body: smdSnapshotResponse},
+		{name: "partial content", status: http.StatusPartialContent, body: smdSnapshotResponse},
+		{name: "missing inventory", status: http.StatusOK, body: `{}`},
+		{name: "null response", status: http.StatusOK, body: `null`},
+		{name: "null inventory", status: http.StatusOK, body: `{"ComponentEndpoints":null}`},
+		{name: "invalid inventory type", status: http.StatusOK, body: `{"ComponentEndpoints":{}}`},
+		{name: "truncated inventory", status: http.StatusOK, body: strings.TrimSuffix(smdSnapshotResponse, "]}") + ","},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			resetCurrentNodes()
+			t.Cleanup(resetCurrentNodes)
+			updateNodes([]NodeConsoleInfo{
+				{ID: "x0c0s1b0", ConnectionType: SSH, ConnectionHost: "ssh-bmc", ConnectionPort: 22},
+				{ID: "x0c0s1b1", ConnectionType: IPMI, ConnectionHost: "ipmi-bmc", ConnectionPort: 623},
+			})
+			before := CurrentNodes()
+			requests := 0
+			client := &http.Client{Transport: smdRoundTripper(func(req *http.Request) (*http.Response, error) {
+				requests++
+				require.Equal(t, http.MethodGet, req.Method)
+				require.Equal(t, "/hsm/v2/Inventory/ComponentEndpoints", req.URL.Path)
+				if testCase.err != nil {
+					return nil, testCase.err
+				}
+				return &http.Response{StatusCode: testCase.status, Body: io.NopCloser(strings.NewReader(testCase.body))}, nil
+			})}
+
+			require.False(t, CheckForUpdates(context.Background(), client, "http://smd/"))
+			require.Equal(t, before, CurrentNodes())
+			require.Equal(t, 1, requests, "refresh should use one bulk request")
+		})
+	}
+}
+
+func TestCheckForUpdatesRefreshesSnapshot(t *testing.T) {
+	resetCurrentNodes()
+	t.Cleanup(resetCurrentNodes)
+	updateNodes([]NodeConsoleInfo{{ID: "x0c0s1b0", ConnectionType: IPMI}})
+
+	body := smdSnapshotResponse
+	requests := 0
+	client := &http.Client{Transport: smdRoundTripper(func(req *http.Request) (*http.Response, error) {
+		requests++
+		require.Equal(t, http.MethodGet, req.Method)
+		require.Equal(t, "/hsm/v2/Inventory/ComponentEndpoints", req.URL.Path)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+
+	require.True(t, CheckForUpdates(context.Background(), client, "http://smd/"))
+	require.Equal(t, map[string]*NodeConsoleInfo{
+		"x0c0s2b0": {ID: "x0c0s2b0", ConnectionType: SSH, ConnectionHost: "bmc.example", ConnectionPort: 22},
+	}, CurrentNodes())
+	require.False(t, CheckForUpdates(context.Background(), client, "http://smd/"), "identical inventory should not report changes")
+
+	body = `{"ComponentEndpoints":[]}`
+	require.True(t, CheckForUpdates(context.Background(), client, "http://smd/"))
+	require.Empty(t, CurrentNodes(), "a valid empty inventory should remove previous nodes")
+	require.Equal(t, 3, requests, "each refresh should use one bulk request")
 }
