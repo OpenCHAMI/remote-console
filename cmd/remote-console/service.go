@@ -22,8 +22,6 @@ import (
 	"github.com/openchami/remote-console/internal/logs"
 	"github.com/openchami/remote-console/internal/nodes"
 	"github.com/openchami/remote-console/internal/ssh"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
 )
 
 const smdHTTPTimeout = 15 * time.Second
@@ -309,37 +307,8 @@ func runService(config remoteConsoleConfig) error {
 	// Create service context for coordinating shutdown of background goroutines
 	serviceCtx, serviceStopCtx := context.WithCancel(context.Background())
 
-	// Configure HTTP client for SMD requests
-	var smdHTTPClient *http.Client
-	if config.Oauth2.TokenURL != "" {
-		slog.Info("Configuring OAuth2 client for SMD authentication")
-
-		clientConfig := &clientcredentials.Config{
-			ClientID:     config.Oauth2.ClientID,
-			ClientSecret: config.Oauth2.ClientSecret,
-			TokenURL:     config.Oauth2.TokenURL,
-			Scopes:       config.Oauth2.Scopes,
-			AuthStyle:    oauth2.AuthStyleInHeader,
-		}
-
-		ctx := context.Background()
-		ts := clientConfig.TokenSource(ctx)
-
-		// Create HTTP client with OAuth2 transport
-		smdHTTPClient = &http.Client{
-			Transport: &oauth2.Transport{
-				Source: ts,
-				Base:   http.DefaultTransport,
-			},
-			Timeout: smdHTTPTimeout,
-		}
-		slog.Info("OAuth2 client configured for SMD requests")
-	} else {
-		// Use default HTTP client without OAuth2
-		smdHTTPClient = &http.Client{
-			Timeout: smdHTTPTimeout,
-		}
-	}
+	smdHTTPClient := newSMDHTTPClient(context.Background(), config)
+	defer smdHTTPClient.CloseIdleConnections()
 
 	// Create the SSH console manager.
 	sshManager := ssh.NewSSHConsoleManager(config.SSH, config.Creds.SshConsoleKeyPath, consoleLogsPath)
