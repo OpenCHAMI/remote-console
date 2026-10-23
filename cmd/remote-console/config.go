@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/openchami/remote-console/internal/auth"
 	"github.com/openchami/remote-console/internal/conman"
 	"github.com/openchami/remote-console/internal/creds"
 	"github.com/openchami/remote-console/internal/logs"
@@ -33,6 +34,8 @@ type remoteConsoleConfig struct {
 	SmdURL               string `desc:"URL for the SMD service"`
 	JwksURL              string `desc:"JWKS URL for fetching public keys for JWT validation (optional)"`
 	JwksFetchInterval    int    `desc:"Interval in seconds to retry fetching JWKS on failure"`
+	AuthProvider         string `desc:"Inbound authentication provider: jwks or tokensmith"`
+	Tokensmith           auth.TokensmithConfig
 	Oauth2               OAuth2Config
 }
 
@@ -49,7 +52,9 @@ func DefaultConfig() remoteConsoleConfig {
 		JwksURL:              "",
 		JwksFetchInterval:    5,
 		// Note: Oauth2 vs OAuth2 so the sflags generate the correct flag name
-		Oauth2: OAuth2Config{},
+		Oauth2:       OAuth2Config{},
+		AuthProvider: "jwks",
+		Tokensmith:   auth.TokensmithConfig{Audience: "remote-console", AuthzMode: "enforce"},
 	}
 }
 
@@ -110,6 +115,19 @@ func validateConfig(config *remoteConsoleConfig) error {
 
 	if err := config.SSH.Validate(); err != nil {
 		return fmt.Errorf("invalid SSH console configuration: %w", err)
+	}
+
+	switch config.AuthProvider {
+	case "jwks":
+		if config.JwksFetchInterval < 0 {
+			return fmt.Errorf("jwks-fetch-interval must not be negative")
+		}
+	case "tokensmith":
+		if err := config.Tokensmith.Validate(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("invalid auth-provider %q: use jwks or tokensmith", config.AuthProvider)
 	}
 
 	// Validate OAuth2 configuration - either all or nothing
