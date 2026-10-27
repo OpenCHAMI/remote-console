@@ -119,6 +119,7 @@ precedence over environment variables.
 | `--new-node-lookup` | `RCS_NEW_NODE_LOOKUP` | `120` | Interval in seconds to look for new nodes. |
 | `--creds-monitor-interval` | `RCS_CREDS_MONITOR_INTERVAL` | `30` | Interval in seconds to monitor credential updates. |
 | `--smd-url` | `RCS_SMD_URL` | `http://cray-smd/` | URL for the SMD service. A trailing slash is added automatically. |
+| `--console-config-file` | `RCS_CONSOLE_CONFIG_FILE` | empty | Optional JSON file containing console overrides keyed by node ID. |
 | `--jwks-url` | `RCS_JWKS_URL` | empty | JWKS URL for fetching public keys for JWT validation. |
 | `--jwks-fetch-interval` | `RCS_JWKS_FETCH_INTERVAL` | `5` | Interval in seconds to retry fetching JWKS on failure. |
 | `--oauth2-client-id` | `RCS_OAUTH2_CLIENT_ID` | empty | OAuth2 client ID for SMD authentication. |
@@ -135,6 +136,35 @@ precedence over environment variables.
 | `--log-rotate-check-frequency` | `RCS_LOG_ROTATE_CHECK_FREQUENCY` | `600` | Frequency in seconds to check for log rotation. |
 | `--log-rotate-file-path` | `RCS_LOG_ROTATE_FILE_PATH` | `/tmp/logrotate.conman` | Path to generated logrotate configuration file. |
 | `--log-rotate-state-file-path` | `RCS_LOG_ROTATE_STATE_FILE_PATH` | `/tmp/rot_conman.state` | Path to logrotate state file. |
+
+### Per-node console overrides
+
+Use `--console-config-file /path/to/consoles.json` to supply missing console
+information or override Redfish settings:
+
+```json
+{
+  "x0c0s0b0n0": {
+    "connectionType": "ssh",
+    "consoleEntryCommand": "console 0"
+  },
+  "x0c0s0b0n1": {
+    "connectionType": "ssh",
+    "consoleEntryCommand": "console 1"
+  }
+}
+```
+
+Each entry applies only to a matching enabled SMD component endpoint. Explicit
+fields override Redfish. Omitted fields retain discovered values. Without
+Redfish console metadata, `connectionType` (`ssh` or `ipmi`) is required and the
+host comes from SMD's `RedfishEndpointFQDN`. You can also set `connectionHost`
+and `connectionPort`. SSH uses port 22 when its port is omitted or zero.
+An explicit empty `consoleEntryCommand` requests an SSH shell.
+
+The file is reread at every node lookup (`--new-node-lookup`). If it cannot be
+read or contains invalid settings for a matching endpoint, the refresh is
+rejected and the previous console inventory is retained.
 
 OAuth2 settings are all-or-nothing. If any OAuth2 field is set, all of
 `--oauth2-client-id`, `--oauth2-client-secret`, `--oauth2-token-url`, and

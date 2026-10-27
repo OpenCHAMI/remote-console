@@ -105,7 +105,7 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpC
 			slog.Info("Exiting node watch loop due to shutdown")
 			return
 		case <-ticker.C:
-			changed := nodes.CheckForUpdates(ctx, httpClient, config.SmdURL)
+			changed := nodes.CheckForUpdates(ctx, httpClient, config.SmdURL, config.ConsoleConfigFile)
 
 			if changed {
 				slog.Info("Node changes detected, reconfiguring services")
