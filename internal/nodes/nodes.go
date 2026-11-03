@@ -138,15 +138,21 @@ func getComponentEndpoints(ctx context.Context, httpClient *http.Client, smdURL 
 
 	// Query smd to get the component endpoints
 	URL := smdURL + "hsm/v2/Inventory/ComponentEndpoints"
-	data, _, err := getURL(ctx, httpClient, URL, nil)
+	data, status, err := getURL(ctx, httpClient, URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get component endpoints from hsm: %w", err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("unable to get component endpoints from hsm: unexpected HTTP status %d", status)
 	}
 
 	// decode the response
 	err = json.Unmarshal(data, &response)
 	if err != nil {
 		return nil, fmt.Errorf("unable to unmarshal component endpoints response: %w", err)
+	}
+	if response.ComponentEndpoints == nil {
+		return nil, fmt.Errorf("invalid component endpoints response: ComponentEndpoints must be an array")
 	}
 
 	return response.ComponentEndpoints, nil
