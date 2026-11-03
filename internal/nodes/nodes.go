@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -220,9 +221,21 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 }
 
 // currentNodesFromSMD queries HSM for all node information and returns a slice of NodeConsoleInfo
-func currentNodesFromSMD(ctx context.Context, httpClient *http.Client, smdURL string) (nodes []NodeConsoleInfo, err error) {
+func currentNodesFromSMD(ctx context.Context, httpClient *http.Client, smdURL, consoleConfigFile string) (nodes []NodeConsoleInfo, err error) {
 
 	slog.Info("Starting to get current nodes on the system")
+
+	var overrides map[string]json.RawMessage
+	if consoleConfigFile != "" {
+		data, err := os.ReadFile(consoleConfigFile)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read console overrides: %w", err)
+		}
+
+		if err := json.Unmarshal(data, &overrides); err != nil {
+			return nil, fmt.Errorf("unable to decode console overrides: %w", err)
+		}
+	}
 
 	endpoints, err := getComponentEndpoints(ctx, httpClient, smdURL)
 	if err != nil {
@@ -242,6 +255,25 @@ func currentNodesFromSMD(ctx context.Context, httpClient *http.Client, smdURL st
 			nci = serialConsoleToNodeConsoleInfo(ep)
 		} else if ep.RedfishManagerInfo != nil && ep.RedfishManagerInfo.CommandShell != nil {
 			nci = commandShellToNodeConsoleInfo(ep)
+		}
+
+		if override, ok := overrides[ep.ID]; ok {
+			if nci == nil {
+				nci = &NodeConsoleInfo{ConnectionHost: ep.RedfishEndpointFQDN}
+			}
+
+			// Decode into the discovered record so omitted fields retain SMD values.
+			if err := json.Unmarshal(override, nci); err != nil {
+				return nil, fmt.Errorf("invalid console override for %s: %w", ep.ID, err)
+			}
+			nci.ID = ep.ID
+			if nci.ConnectionType != SSH && nci.ConnectionType != IPMI {
+				return nil, fmt.Errorf("console override for %s requires connectionType ssh or ipmi", ep.ID)
+			}
+			
+			if strings.TrimSpace(nci.ConnectionHost) == "" || nci.ConnectionPort < 0 || nci.ConnectionPort > 65535 {
+				return nil, fmt.Errorf("console override for %s has an invalid host or port", ep.ID)
+			}
 		}
 
 		// If we have extracted console information add it to the list
@@ -287,7 +319,7 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 	return changed
 }
 
-func CheckForUpdates(ctx context.Context, httpClient *http.Client, smdURL string) bool {
+func CheckForUpdates(ctx context.Context, httpClient *http.Client, smdURL, consoleConfigFile string) bool {
 	hardwareUpdateTimeMutex.Lock()
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 	hardwareUpdateTimeMutex.Unlock()
@@ -296,7 +328,7 @@ func CheckForUpdates(ctx context.Context, httpClient *http.Client, smdURL string
 	// keep track of if we need to redo the configuration
 	changed := false
 
-	fetched_nodes, err := currentNodesFromSMD(ctx, httpClient, smdURL)
+	fetched_nodes, err := currentNodesFromSMD(ctx, httpClient, smdURL, consoleConfigFile)
 	if err != nil {
 		slog.Error("Error getting current nodes from SMD", "error", err)
 		return false
