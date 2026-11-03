@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Optional TokenSmith authentication and Casbin authorization for console endpoints.
+- Optional TokenSmith service tokens for outbound SMD requests using bootstrap or mTLS identity.
 - Authentication regression tests for the existing JWKS and OAuth2 providers, and TokenSmith integration coverage.
 
 ## [2.4.0] - 2025-02-13
