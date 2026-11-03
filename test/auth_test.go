@@ -103,7 +103,7 @@ func (s *IntegrationTestSuite) TestStartupFailures() {
 		message string
 	}{
 		{"incomplete OAuth2", map[string]string{"RCS_OAUTH2_CLIENT_ID": "incomplete"}, "incomplete OAuth2 configuration"},
-		{"JWKS failure", map[string]string{"RCS_JWKS_URL": jwksURL + "/missing", "RCS_JWKS_FETCH_INTERVAL": "0"}, "failed to fetch JWKS"},
+		{"JWKS failure", map[string]string{"RCS_JWKS_URL": jwksURL + "/missing", "RCS_JWKS_FETCH_INTERVAL": "0"}, "initialize JWKS"},
 	} {
 		s.Run(tc.name, func() { s.assertStartupFailure(tc.env, tc.message) })
 	}
