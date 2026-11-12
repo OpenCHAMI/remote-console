@@ -7,15 +7,13 @@ package console
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 
-	"github.com/OpenCHAMI/jwtauth/v5"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/websocket"
-	openchami_authenticator "github.com/openchami/chi-middleware/auth"
 
+	"github.com/openchami/remote-console/internal/auth"
 	"github.com/openchami/remote-console/internal/ssh"
 )
 
@@ -49,12 +47,12 @@ func doConsole(consoleLogsPath string, sessions *interactiveSessions, sshMgr *ss
 	}
 }
 
-func SetupRoutes(consoleLogsPath string, sshMgr *ssh.SSHConsoleManager) *chi.Mux {
+func SetupRoutes(consoleLogsPath string, sshMgr *ssh.SSHConsoleManager, authentication auth.Auth) *chi.Mux {
 	router := chi.NewRouter()
 	interactiveSessions := newInteractiveSessions()
 
 	// Add common middleware
-	router.Use(middleware.RedirectSlashes)
+	router.Use(middleware.RequestID, middleware.RedirectSlashes)
 
 	router.Route(routePrefix, func(r chi.Router) {
 		// Public routes (no authentication required)
@@ -64,15 +62,7 @@ func SetupRoutes(consoleLogsPath string, sshMgr *ssh.SSHConsoleManager) *chi.Mux
 
 		// Protected routes - add to a sub-router with JWT middleware
 		r.Group(func(r chi.Router) {
-			// Conditionally add JWT authentication middleware
-			if TokenAuth != nil {
-				r.Use(
-					jwtauth.Verifier(TokenAuth),
-					openchami_authenticator.AuthenticatorWithRequiredClaims(TokenAuth, []string{"sub", "iss", "aud"}),
-				)
-			} else {
-				slog.Warn("JWT authentication is disabled - all console endpoints are unprotected")
-			}
+			r.Use(authentication.Wrap)
 
 			r.Get("/consoles", doConsoles)
 			r.Get("/consoles/{nodeID}", func(w http.ResponseWriter, r *http.Request) {
