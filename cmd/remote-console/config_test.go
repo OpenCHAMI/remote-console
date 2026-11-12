@@ -6,7 +6,7 @@ package main
 
 import "testing"
 
-func TestCommandIncludesConsoleLogSettings(t *testing.T) {
+func TestCommandIncludesConsoleSettings(t *testing.T) {
 	config := DefaultConfig()
 	cmd := command(&config)
 	flags := make(map[string]bool)
@@ -16,7 +16,7 @@ func TestCommandIncludesConsoleLogSettings(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"console-logs-base-path", "conman-logs-path"} {
+	for _, name := range []string{"console-logs-base-path", "conman-logs-path", "console-config-file"} {
 		if !flags[name] {
 			t.Errorf("command does not provide %s", name)
 		}

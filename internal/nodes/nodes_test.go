@@ -5,6 +5,11 @@
 package nodes
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -173,4 +178,95 @@ func TestCurrentNode(t *testing.T) {
 
 	node.ConnectionType = SSH
 	require.Equal(t, IPMI, CurrentNode("ipmi").ConnectionType)
+}
+
+func mockSMDServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/hsm/v2/Inventory/ComponentEndpoints", r.URL.Path)
+		_, _ = w.Write([]byte(`{"ComponentEndpoints":[
+			{"ID":"x0c0s0b0n0","Enabled":true,"RedfishEndpointFQDN":"bmc0",
+			 "RedfishSystemInfo":{"SerialConsole":{"SSH":{
+			 "ServiceEnabled":true,"Port":2222,"ConsoleEntryCommand":"original"}}}},
+			{"ID":"x0c0s0b1n0","Enabled":true,"RedfishEndpointFQDN":"bmc1"},
+			{"ID":"x0c0s0b2n0","Enabled":false,"RedfishEndpointFQDN":"bmc2"}
+		]}`))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestConsoleOverrides(t *testing.T) {
+	server := mockSMDServer(t)
+	original := NodeConsoleInfo{
+		ID: "x0c0s0b0n0", ConnectionType: SSH, ConnectionHost: "bmc0",
+		ConnectionPort: 2222, ConsoleEntryCommand: "original",
+	}
+	tests := []struct {
+		name    string
+		config  string
+		want    []NodeConsoleInfo
+		wantErr string
+	}{
+		{name: "no file", want: []NodeConsoleInfo{original}},
+		{name: "command override retains discovery", config: `{"x0c0s0b0n0":{"consoleEntryCommand":"console 0"}}`,
+			want: []NodeConsoleInfo{{ID: original.ID, ConnectionType: SSH, ConnectionHost: "bmc0", ConnectionPort: 2222, ConsoleEntryCommand: "console 0"}}},
+		{name: "explicit empty command", config: `{"x0c0s0b0n0":{"consoleEntryCommand":""}}`,
+			want: []NodeConsoleInfo{{ID: original.ID, ConnectionType: SSH, ConnectionHost: "bmc0", ConnectionPort: 2222}}},
+		{name: "missing metadata", config: `{"x0c0s0b1n0":{"connectionType":"ssh","consoleEntryCommand":"console 1"}}`,
+			want: []NodeConsoleInfo{original, {ID: "x0c0s0b1n0", ConnectionType: SSH, ConnectionHost: "bmc1", ConsoleEntryCommand: "console 1"}}},
+		{name: "connection override", config: `{"x0c0s0b0n0":{"connectionType":"ipmi","connectionHost":"other-bmc","connectionPort":0,"consoleEntryCommand":""}}`,
+			want: []NodeConsoleInfo{{ID: original.ID, ConnectionType: IPMI, ConnectionHost: "other-bmc"}}},
+		{name: "disabled and absent endpoints ignored", config: `{"x0c0s0b2n0":{"connectionType":"ssh"},"absent":{"connectionType":"ssh"}}`,
+			want: []NodeConsoleInfo{original}},
+		{name: "malformed file", config: `{`, wantErr: "unable to decode console overrides"},
+		{name: "invalid field type", config: `{"x0c0s0b0n0":{"connectionPort":"bad"}}`, wantErr: "invalid console override"},
+		{name: "missing connection type", config: `{"x0c0s0b1n0":{"consoleEntryCommand":"console 1"}}`, wantErr: "requires connectionType"},
+		{name: "unsupported connection type", config: `{"x0c0s0b0n0":{"connectionType":"telnet"}}`, wantErr: "requires connectionType"},
+		{name: "empty host", config: `{"x0c0s0b0n0":{"connectionHost":""}}`, wantErr: "invalid host or port"},
+		{name: "invalid port", config: `{"x0c0s0b0n0":{"connectionPort":65536}}`, wantErr: "invalid host or port"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var path string
+			if tt.config != "" {
+				path = filepath.Join(t.TempDir(), "consoles.json")
+				require.NoError(t, os.WriteFile(path, []byte(tt.config), 0600))
+			}
+			got, err := currentNodesFromSMD(context.Background(), server.Client(), server.URL+"/", path)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestConsoleOverridesRefresh(t *testing.T) {
+	resetCurrentNodes()
+	t.Cleanup(resetCurrentNodes)
+	server := mockSMDServer(t)
+	path := filepath.Join(t.TempDir(), "consoles.json")
+	refresh := func(config string) bool {
+		t.Helper()
+		require.NoError(t, os.WriteFile(path, []byte(config), 0600))
+		return CheckForUpdates(context.Background(), server.Client(), server.URL+"/", path)
+	}
+
+	require.True(t, refresh(`{"x0c0s0b1n0":{"connectionType":"ssh","consoleEntryCommand":"console 1"}}`))
+	require.False(t, refresh(`{"x0c0s0b1n0":{"connectionType":"ssh","consoleEntryCommand":"console 1"}}`))
+	require.True(t, refresh(`{"x0c0s0b1n0":{"connectionType":"ssh","consoleEntryCommand":"console 2"}}`))
+	require.Equal(t, "console 2", CurrentNode("x0c0s0b1n0").ConsoleEntryCommand)
+
+	previous := CurrentNodes()
+	require.False(t, refresh(`{`))
+	require.Equal(t, previous, CurrentNodes())
+	require.False(t, CheckForUpdates(context.Background(), server.Client(), server.URL+"/", path+".missing"))
+	require.Equal(t, previous, CurrentNodes())
+
+	require.True(t, refresh(`{}`))
+	require.Nil(t, CurrentNode("x0c0s0b1n0"))
+	require.Equal(t, "original", CurrentNode("x0c0s0b0n0").ConsoleEntryCommand)
 }
