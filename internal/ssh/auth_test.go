@@ -50,10 +50,11 @@ func writeTestCertificate(t *testing.T, path string, key gossh.PublicKey) {
 		t.Fatal(err)
 	}
 	cert := &gossh.Certificate{
-		Key:         key,
-		CertType:    gossh.UserCert,
-		KeyId:       "test",
-		ValidBefore: gossh.CertTimeInfinity,
+		Key:             key,
+		CertType:        gossh.UserCert,
+		KeyId:           "test",
+		ValidPrincipals: []string{"test"},
+		ValidBefore:     gossh.CertTimeInfinity,
 	}
 	if err := cert.SignCert(rand.Reader, caSigner); err != nil {
 		t.Fatal(err)
