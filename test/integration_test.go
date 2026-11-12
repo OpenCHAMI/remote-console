@@ -5,6 +5,7 @@
 package test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -12,6 +13,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,14 +25,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/openchami/remote-console/internal/console"
+	"github.com/openchami/remote-console/internal/nodes"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"golang.org/x/crypto/ssh"
-
-	"github.com/openchami/remote-console/internal/console"
-	"github.com/openchami/remote-console/internal/nodes"
 )
 
 const (
@@ -47,6 +49,8 @@ func makeUnique(prefix string) string {
 type IntegrationTestSuite struct {
 	suite.Suite
 	apiURL         string
+	keycloakURL    string
+	smdURL         string
 	containers     map[string]testcontainers.Container
 	vaultContainer testcontainers.Container
 	rcsNetwork     *testcontainers.DockerNetwork
@@ -107,6 +111,8 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	ctx := context.Background()
 	s.containers = make(map[string]testcontainers.Container)
+	// Register first so provider logs and cleanup run before shared services and networks.
+	s.T().Cleanup(s.cleanupContainers)
 
 	// Create networks
 	rcsNet, err := network.New(ctx)
@@ -251,10 +257,11 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Logf("Remote console API available at: %s", s.apiURL)
 	s.T().Log("Waiting for remote-console to discover consoles...")
 	s.Require().NoError(s.waitForConsoles(5, 5*time.Minute), "remote-console did not discover expected consoles")
+	s.setupAuthentication()
 }
 
-// TearDownSuite runs once after all tests in the suite
-func (s *IntegrationTestSuite) TearDownSuite() {
+// cleanupContainers runs after provider log collection and cleanup.
+func (s *IntegrationTestSuite) cleanupContainers() {
 	// Create a context with timeout for cleanup
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -749,4 +756,182 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 // TestIntegrationSuite runs the integration test suite
 func TestIntegrationSuite(t *testing.T) {
 	suite.Run(t, new(IntegrationTestSuite))
+}
+
+const (
+	oidcPath      = "/realms/rcs-auth-test/protocol/openid-connect"
+	jwksURL       = "http://keycloak:8080" + oidcPath + "/certs"
+	tokenURL      = "http://keycloak:8080" + oidcPath + "/token"
+	inventoryPath = "/hsm/v2/Inventory/ComponentEndpoints"
+)
+
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+// newContainer collects failure logs before its single cleanup owner terminates it.
+func newContainer(t *testing.T, req testcontainers.ContainerRequest) testcontainers.Container {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{ContainerRequest: req, Started: true})
+	testcontainers.CleanupContainer(t, ctr)
+	if ctr != nil {
+		t.Cleanup(func() {
+			if t.Failed() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				logs, err := ctr.Logs(ctx)
+				if err == nil {
+					defer func() { _ = logs.Close() }()
+					data, _ := io.ReadAll(logs)
+					t.Logf("%s logs:\n%s", req.Image, data)
+				}
+			}
+		})
+	}
+	require.NoError(t, err)
+	return ctr
+}
+
+func endpoint(t *testing.T, ctr testcontainers.Container, port string) string {
+	t.Helper()
+	result, err := ctr.PortEndpoint(context.Background(), port, "http")
+	require.NoError(t, err)
+	return result
+}
+
+func (s *IntegrationTestSuite) setupAuthentication() {
+	t := s.T()
+	kc := newContainer(t, testcontainers.ContainerRequest{
+		Image: "quay.io/keycloak/keycloak:26.7.4", Cmd: []string{"start-dev", "--import-realm"},
+		Env:      map[string]string{"KC_HOSTNAME": "http://keycloak:8080"},
+		Files:    []testcontainers.ContainerFile{{HostFilePath: "testdata/realm.json", ContainerFilePath: "/opt/keycloak/data/import/realm.json", FileMode: 0644}},
+		Networks: []string{s.rcsNetwork.Name}, NetworkAliases: map[string][]string{s.rcsNetwork.Name: {"keycloak"}},
+		ExposedPorts: []string{"8080/tcp"}, WaitingFor: wait.ForHTTP(oidcPath + "/certs").WithPort("8080/tcp").WithStartupTimeout(5 * time.Minute),
+	})
+	s.keycloakURL = endpoint(t, kc, "8080/tcp")
+
+	s.smdURL = s.startSMD("smd-auth", jwksURL)
+}
+
+func smdEnv() map[string]string {
+	return map[string]string{"SMD_DBHOST": "postgres", "SMD_DBPORT": "5432", "SMD_DBNAME": "hmsds", "SMD_DBUSER": "postgres", "SMD_DBPASS": "postgres", "SMD_DBOPTS": "sslmode=disable", "SMD_WVAULT": "false", "SMD_RVAULT": "false", "SMD_SLS_HOST": "", "SMD_HBTD_HOST": "", "ENABLE_DISCOVERY": "false"}
+}
+
+func (s *IntegrationTestSuite) startSMD(alias, jwks string) string {
+	env := smdEnv()
+	env["SMD_JWKS_URL"] = jwks
+	ctr := newContainer(s.T(), testcontainers.ContainerRequest{Image: smdImage, Env: env, Networks: []string{s.rcsNetwork.Name}, NetworkAliases: map[string][]string{s.rcsNetwork.Name: {alias}}, ExposedPorts: []string{"27779/tcp"}, WaitingFor: wait.ForHTTP("/hsm/v2/service/ready").WithPort("27779/tcp").WithStartupTimeout(time.Minute)})
+	return endpoint(s.T(), ctr, "27779/tcp")
+}
+
+func (s *IntegrationTestSuite) addConsoleEndpoint(xname string) {
+	t := s.T()
+	ctx := context.Background()
+	authConfig := defaultAuthConfig
+	ctr, err := startRedfishEmulator(ctx, s.rfNetwork.Name, xname, "ssh", &authConfig)
+	testcontainers.CleanupContainer(t, ctr)
+	require.NoError(t, err)
+	smdAPIURL, err := getSMDAPIURL(ctx, s.containers["smd"])
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, deleteRedfishEndpoint(t, ctx, smdAPIURL, xname))
+		require.NoError(t, s.waitForConsoleRemoval(xname, time.Minute))
+		require.NoError(t, s.waitForConsoleRemoval(xname+"n0", time.Minute))
+	})
+	require.NoError(t, loadRedfishEndpoint(t, ctx, smdAPIURL, redfishEndpoint{
+		Host: xname, Username: "ADMIN", Password: "ADMIN",
+	}))
+}
+
+func oauthEnv() map[string]string {
+	return map[string]string{"RCS_OAUTH2_CLIENT_ID": "rcs-service", "RCS_OAUTH2_CLIENT_SECRET": "rcs-service-test-secret", "RCS_OAUTH2_TOKEN_URL": tokenURL, "RCS_OAUTH2_SCOPES": "rcs-test"}
+}
+
+// consoleImage follows replacements made by the log-rotation test.
+func (s *IntegrationTestSuite) consoleImage() string {
+	info, err := s.containers["remote-console"].Inspect(context.Background())
+	require.NoError(s.T(), err)
+	return info.Config.Image
+}
+
+func (s *IntegrationTestSuite) startConsole(extra map[string]string, args ...string) string {
+	env := map[string]string{
+		"RCS_JWKS_URL": jwksURL, "RCS_SMD_URL": "http://smd-auth:27779", "RCS_NEW_NODE_LOOKUP": "1", "RCS_CREDS_MONITOR_INTERVAL": "3600",
+		"RCS_CREDS_SECURE_STORAGE_ADAPTER": "local", "RCS_CREDS_LOCAL_STORE_FILE_PATH": "/tmp/creds", "RCS_CREDS_LOCAL_STORE_KEY": "test-only",
+		"RCS_CONSOLE_LOGS_BASE_PATH": "/tmp/logs", "RCS_CONSOLE_LOGS_BACKUP_PATH": "/tmp/old", "RCS_CONMAN_PID_FILE_PATH": "/tmp/conman.pid",
+	}
+	maps.Copy(env, oauthEnv())
+	maps.Copy(env, extra)
+	ctr := newContainer(s.T(), testcontainers.ContainerRequest{Image: s.consoleImage(), Env: env, Cmd: args, Networks: []string{s.rcsNetwork.Name}, ExposedPorts: []string{"26776/tcp"}, WaitingFor: wait.ForHTTP("/remote-console/liveness").WithPort("26776/tcp").WithStatusCodeMatcher(func(status int) bool { return status == 204 }).WithStartupTimeout(time.Minute)})
+	return endpoint(s.T(), ctr, "26776/tcp")
+}
+
+func request(t *testing.T, method, address, token string, body []byte) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, address, bytes.NewReader(body))
+	require.NoError(t, err)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, resp.Body.Close()) }()
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, data
+}
+
+func (s *IntegrationTestSuite) fetchToken(client string) string {
+	form := url.Values{"grant_type": {"client_credentials"}, "scope": {"rcs-test"}}
+	req, err := http.NewRequest(http.MethodPost, s.keycloakURL+oidcPath+"/token", strings.NewReader(form.Encode()))
+	require.NoError(s.T(), err)
+	secret := client + "-secret"
+	if client == "rcs-service" {
+		secret = "rcs-service-test-secret"
+	}
+	req.SetBasicAuth(client, secret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpClient.Do(req)
+	require.NoError(s.T(), err)
+	defer func() { require.NoError(s.T(), resp.Body.Close()) }()
+	require.Equal(s.T(), 200, resp.StatusCode)
+	var token struct {
+		AccessToken string `json:"access_token"`
+	}
+	require.NoError(s.T(), json.NewDecoder(resp.Body).Decode(&token))
+	require.NotEmpty(s.T(), token.AccessToken)
+	return token.AccessToken
+}
+
+func waitFor(t *testing.T, timeout time.Duration, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for authentication state change")
+}
+
+func (s *IntegrationTestSuite) assertStartupFailure(env map[string]string, message string) {
+	t := s.T()
+	t.Helper()
+	ctr := newContainer(t, testcontainers.ContainerRequest{
+		Image: s.consoleImage(), Env: env, Networks: []string{s.rcsNetwork.Name},
+		WaitingFor: wait.ForExit().WithExitTimeout(30 * time.Second),
+	})
+	state, err := ctr.State(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, state.ExitCode)
+	logs, err := ctr.Logs(context.Background())
+	require.NoError(t, err)
+	defer func() { require.NoError(t, logs.Close()) }()
+	data, err := io.ReadAll(logs)
+	require.NoError(t, err)
+	require.Contains(t, string(data), message)
 }

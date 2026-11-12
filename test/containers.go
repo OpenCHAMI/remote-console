@@ -28,6 +28,8 @@ type redfishEndpoint struct {
 	Password string
 }
 
+const smdImage = "ghcr.io/openchami/smd:v2.20.4"
+
 // startVault starts a Vault container with development mode enabled
 func startVault(ctx context.Context, networks ...string) (testcontainers.Container, error) {
 
@@ -163,7 +165,7 @@ func startPostgres(ctx context.Context, network string) (testcontainers.Containe
 // initSMDDatabase initializes the SMD database schema
 func initSMDDatabase(ctx context.Context, network string) error {
 	req := testcontainers.ContainerRequest{
-		Image:    "ghcr.io/openchami/smd:v2.19.2",
+		Image:    smdImage,
 		Networks: []string{network},
 		Env: map[string]string{
 			"SMD_DBHOST": "postgres",
@@ -187,7 +189,7 @@ func initSMDDatabase(ctx context.Context, network string) error {
 // startSMD starts SMD
 func startSMD(ctx context.Context, networks ...string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
-		Image:          "ghcr.io/openchami/smd:v2.19.2",
+		Image:          smdImage,
 		Hostname:       "smd",
 		Networks:       networks,
 		NetworkAliases: map[string][]string{},
