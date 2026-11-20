@@ -48,15 +48,16 @@ func makeUnique(prefix string) string {
 // IntegrationTestSuite is the test suite for remote-console integration tests
 type IntegrationTestSuite struct {
 	suite.Suite
-	apiURL         string
-	keycloakURL    string
-	smdURL         string
-	tokensmith     testcontainers.Container
-	containers     map[string]testcontainers.Container
-	vaultContainer testcontainers.Container
-	rcsNetwork     *testcontainers.DockerNetwork
-	rfNetwork      *testcontainers.DockerNetwork
-	consoleNetwork *testcontainers.DockerNetwork
+	apiURL           string
+	keycloakURL      string
+	smdURL           string
+	tokensmith       testcontainers.Container
+	smdTokenSmithURL string
+	containers       map[string]testcontainers.Container
+	vaultContainer   testcontainers.Container
+	rcsNetwork       *testcontainers.DockerNetwork
+	rfNetwork        *testcontainers.DockerNetwork
+	consoleNetwork   *testcontainers.DockerNetwork
 }
 
 // generateTempSSHKeyPair creates a temporary keypair for testing and returns the private key path and public key string.
@@ -813,6 +814,7 @@ func (s *IntegrationTestSuite) setupAuthentication() {
 
 	s.smdURL = s.startSMD("smd-auth", jwksURL)
 	s.startTokenSmith()
+	s.startTokenSmithSMD()
 }
 
 func smdEnv() map[string]string {

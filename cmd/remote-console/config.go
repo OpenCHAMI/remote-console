@@ -36,6 +36,8 @@ type remoteConsoleConfig struct {
 	JwksFetchInterval    int    `desc:"Interval in seconds to retry fetching JWKS on failure"`
 	AuthProvider         string `desc:"Inbound authentication provider: jwks or tokensmith"`
 	Tokensmith           auth.TokensmithConfig
+	SmdAuthProvider      string `desc:"Outbound SMD authentication provider: oauth2 or tokensmith"`
+	SmdTokensmith        auth.TokensmithClientConfig
 	Oauth2               OAuth2Config
 }
 
@@ -52,9 +54,10 @@ func DefaultConfig() remoteConsoleConfig {
 		JwksURL:              "",
 		JwksFetchInterval:    5,
 		// Note: Oauth2 vs OAuth2 so the sflags generate the correct flag name
-		Oauth2:       OAuth2Config{},
-		AuthProvider: "jwks",
-		Tokensmith:   auth.TokensmithConfig{Audience: "remote-console", AuthzMode: "enforce"},
+		Oauth2:          OAuth2Config{},
+		AuthProvider:    "jwks",
+		Tokensmith:      auth.TokensmithConfig{Audience: "remote-console", AuthzMode: "enforce"},
+		SmdAuthProvider: "oauth2",
 	}
 }
 
@@ -128,6 +131,14 @@ func validateConfig(config *remoteConsoleConfig) error {
 		}
 	default:
 		return fmt.Errorf("invalid auth-provider %q: use jwks or tokensmith", config.AuthProvider)
+	}
+	switch config.SmdAuthProvider {
+	case "oauth2":
+	case "tokensmith":
+		// OAuth2 settings belong to the inactive provider.
+		return nil
+	default:
+		return fmt.Errorf("invalid smd-auth-provider %q: use oauth2 or tokensmith", config.SmdAuthProvider)
 	}
 
 	// Validate OAuth2 configuration - either all or nothing
