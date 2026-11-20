@@ -51,6 +51,7 @@ type IntegrationTestSuite struct {
 	apiURL         string
 	keycloakURL    string
 	smdURL         string
+	tokensmith     testcontainers.Container
 	containers     map[string]testcontainers.Container
 	vaultContainer testcontainers.Container
 	rcsNetwork     *testcontainers.DockerNetwork
@@ -811,6 +812,7 @@ func (s *IntegrationTestSuite) setupAuthentication() {
 	s.keycloakURL = endpoint(t, kc, "8080/tcp")
 
 	s.smdURL = s.startSMD("smd-auth", jwksURL)
+	s.startTokenSmith()
 }
 
 func smdEnv() map[string]string {

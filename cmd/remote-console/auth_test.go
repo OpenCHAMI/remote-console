@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -124,6 +126,19 @@ func TestOAuth2RefreshAndFailure(t *testing.T) {
 			if fail {
 				require.Zero(t, requests.Load(), "auth errors must not send unauthenticated SMD requests")
 			}
+		})
+	}
+}
+
+func TestAuthenticationStartupFailsBeforeWorkers(t *testing.T) {
+	for _, provider := range []string{"invalid", "tokensmith"} {
+		t.Run(provider, func(t *testing.T) {
+			config := DefaultConfig()
+			config.AuthProvider = provider
+			config.Log.ConsoleLogsBasePath = filepath.Join(t.TempDir(), "must-not-exist")
+			require.Error(t, runService(config))
+			_, err := os.Stat(config.Log.ConsoleLogsBasePath)
+			require.ErrorIs(t, err, os.ErrNotExist)
 		})
 	}
 }
