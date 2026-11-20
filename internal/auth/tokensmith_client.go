@@ -9,6 +9,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +20,8 @@ import (
 	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"golang.org/x/oauth2"
 )
+
+const tokenSmithSessionRecoveryInterval = 30 * time.Second
 
 // TokensmithClientConfig configures outbound service token acquisition.
 type TokensmithClientConfig struct {
@@ -82,12 +86,16 @@ type tokenSmithTokenSource struct {
 	keyPath    string
 	httpClient *http.Client
 	client     *tokenservice.ServiceClient
+	// nil means no pending recovery.
+	nextRenewal *time.Time
 }
 
 func (s *tokenSmithTokenSource) initialize() error {
 	options := []tokenservice.ServiceClientOption{
 		tokenservice.WithTargetService("smd"),
 		tokenservice.WithHTTPClient(s.httpClient),
+		// We are handling the retry logic ourselves.
+		tokenservice.WithBootstrapMaxAttempts(1),
 	}
 	if s.certPath != "" {
 		// Validate on every session creation so missing identity files do not
@@ -96,9 +104,6 @@ func (s *tokenSmithTokenSource) initialize() error {
 			return fmt.Errorf("load TokenSmith service identity: %w", err)
 		}
 		options = append(options, tokenservice.WithServiceIdentityCertKey(s.certPath, s.keyPath))
-	} else {
-		// A lost response may mean the server already consumed the bootstrap token.
-		options = append(options, tokenservice.WithBootstrapMaxAttempts(1))
 	}
 	// Remote-console uses its own service identity for SMD, independent of incoming callers.
 	client := tokenservice.NewServiceClientWithOptions(
@@ -112,13 +117,28 @@ func (s *tokenSmithTokenSource) initialize() error {
 }
 
 func (s *tokenSmithTokenSource) Token() (*oauth2.Token, error) {
-	if err := s.client.RefreshTokenIfNeeded(s.ctx); err != nil {
-		if !errors.Is(err, tokenservice.ErrRefreshTokenExpired) || s.certPath == "" {
+	if s.nextRenewal == nil {
+		if err := s.client.RefreshTokenIfNeeded(s.ctx); err != nil {
+			if s.certPath == "" || !tokenSmithSessionNeedsRenewal(err) {
+				return nil, fmt.Errorf("refresh outbound TokenSmith token: %w", err)
+			}
+			// The server may have rotated the token. Never replay it, even if
+			// creating the replacement session fails on this call.
+			s.nextRenewal = new(time.Time)
+		}
+	}
+	if s.nextRenewal != nil {
+		if err := s.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("refresh outbound TokenSmith token: %w", err)
 		}
+		if time.Now().Before(*s.nextRenewal) {
+			return nil, fmt.Errorf("outbound TokenSmith session recovery retry delayed")
+		}
 		if err := s.initialize(); err != nil {
+			*s.nextRenewal = time.Now().Add(tokenSmithSessionRecoveryInterval)
 			return nil, fmt.Errorf("renew outbound TokenSmith session: %w", err)
 		}
+		s.nextRenewal = nil
 	}
 	token := s.client.GetServiceToken()
 	if token == nil || token.Token == "" || !token.ExpiresAt.After(time.Now()) {
@@ -129,4 +149,12 @@ func (s *tokenSmithTokenSource) Token() (*oauth2.Token, error) {
 		TokenType:   "Bearer",
 		Expiry:      token.ExpiresAt,
 	}, nil
+}
+
+func tokenSmithSessionNeedsRenewal(err error) bool {
+	// The TokenSmith client wraps network and truncated-response errors.
+	// HTTP rejections may mean revocation and must not renew the session.
+	var networkErr net.Error
+	return errors.Is(err, tokenservice.ErrRefreshTokenExpired) ||
+		errors.As(err, &networkErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }

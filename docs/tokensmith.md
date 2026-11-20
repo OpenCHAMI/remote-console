@@ -113,9 +113,9 @@ take precedence over a bootstrap token. Missing or invalid identity files cause
 failure rather than falling back to bootstrap credentials.
 
 Refreshes are serialized so concurrent SMD requests share a rotated token.
-When an mTLS refresh session expires, remote-console reloads the current identity
-files and creates a new session, supporting certificate rotation. Bootstrap
-exchange makes one attempt because the credential is single-use. A bootstrap-only
-deployment needs a fresh credential on restart or after its refresh session
+When an mTLS refresh session expires or its response is lost, remote-console
+reloads the identity files and creates a new session. Recovery makes one attempt,
+with a 30-second cooldown on failure. Explicit HTTP rejections, including revocation,
+fail closed. Bootstrap exchange makes one attempt because the credential is single-use. A bootstrap-only deployment needs a fresh credential on restart or after its refresh session
 expires. Refresh failures fail outbound requests; discovery retries on its normal
 polling interval. The readiness probe retains its existing process-level behavior.
