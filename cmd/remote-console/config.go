@@ -31,6 +31,7 @@ type remoteConsoleConfig struct {
 	NewNodeLookup        int    `desc:"Interval in seconds to look for new nodes"`
 	CredsMonitorInterval int    `desc:"Interval in seconds to monitor credential updates"`
 	SmdURL               string `desc:"URL for the SMD service"`
+	ConsoleConfigFile    string `desc:"Path to optional JSON console overrides keyed by node ID"`
 	JwksURL              string `desc:"JWKS URL for fetching public keys for JWT validation (optional)"`
 	JwksFetchInterval    int    `desc:"Interval in seconds to retry fetching JWKS on failure"`
 	Oauth2               OAuth2Config
